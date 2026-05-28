@@ -2497,16 +2497,39 @@ final class AppState: ObservableObject, @unchecked Sendable {
                                 }
                             }
 
+                            // Write the transcript to the clipboard so that the
+                            // Cmd-V fallback path can consume it.  If the AX
+                            // direct-insertion path succeeds the clipboard will
+                            // be restored immediately (it was never consumed).
                             let pendingClipboardRestore = self.writeTranscriptToPasteboard(trimmedFinalTranscript)
-                            self.pasteAtCursorWhenShortcutReleased {
-                                if shouldPressEnterAfterPaste {
-                                    self.pressEnterAfterPaste {
-                                        self.restoreClipboardIfNeeded(pendingClipboardRestore)
+                            self.pasteAtCursorWhenShortcutReleased(
+                                text: trimmedFinalTranscript,
+                                usedAXPath: { didUseAX in
+                                    if didUseAX {
+                                        // Text was inserted via Accessibility – the
+                                        // clipboard was never consumed, so restore
+                                        // it immediately without the usual delay.
+                                        if let pendingClipboardRestore {
+                                            pendingClipboardRestore.snapshot.restore(to: NSPasteboard.general)
+                                        }
+                                        // Press Enter if needed; no clipboard
+                                        // restore is required afterwards.
+                                        if shouldPressEnterAfterPaste {
+                                            self.pressEnterAfterPaste(completion: nil)
+                                        }
+                                    } else {
+                                        // Cmd-V fallback: clipboard was used, so
+                                        // restore it after the app has consumed it.
+                                        if shouldPressEnterAfterPaste {
+                                            self.pressEnterAfterPaste {
+                                                self.restoreClipboardIfNeeded(pendingClipboardRestore)
+                                            }
+                                        } else {
+                                            self.restoreClipboardIfNeeded(pendingClipboardRestore)
+                                        }
                                     }
-                                } else {
-                                    self.restoreClipboardIfNeeded(pendingClipboardRestore)
                                 }
-                            }
+                            )
                         }
 
                         self.audioRecorder.cleanup()
@@ -2892,7 +2915,43 @@ final class AppState: ObservableObject, @unchecked Sendable {
         NotificationCenter.default.post(name: .showSettings, object: nil)
     }
 
-    private func pasteAtCursor() {
+    /// Attempts to insert `text` directly into the focused accessibility element,
+    /// bypassing the clipboard and any active IME.  Returns `true` on success.
+    private func tryInsertTextViaAccessibility(_ text: String) -> Bool {
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedElementRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            systemWide,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedElementRef
+        ) == .success, let focusedElementRef,
+              CFGetTypeID(focusedElementRef) == AXUIElementGetTypeID() else { return false }
+
+        let focusedElement = unsafeBitCast(focusedElementRef, to: AXUIElement.self)
+
+        // Replace the current selection with the transcript text (when nothing
+        // is selected this is equivalent to inserting at the cursor position).
+        let result = AXUIElementSetAttributeValue(
+            focusedElement,
+            kAXSelectedTextAttribute as CFString,
+            text as CFTypeRef
+        )
+        return result == .success
+    }
+
+    /// Pastes `text` at the cursor position.  First tries a direct Accessibility
+    /// insertion (which bypasses CJK IME interception), then falls back to the
+    /// classic clipboard + Cmd-V approach.
+    ///
+    /// - Returns: `true` if the AX path succeeded (clipboard was not used).
+    @discardableResult
+    private func pasteAtCursor(text: String? = nil) -> Bool {
+        // Fast path: AX direct insertion – works even when a CJK IME is active.
+        if let text, tryInsertTextViaAccessibility(text) {
+            return true
+        }
+
+        // Fallback: synthesise a Cmd-V keystroke.
         let source = CGEventSource(stateID: .hidSystemState)
         let vKeyCode = keyCodeForCharacter("v") ?? 9
 
@@ -2903,6 +2962,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let keyUp = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false)
         keyUp?.flags = .maskCommand
         keyUp?.post(tap: .cgSessionEventTap)
+
+        return false
     }
 
     private func keyCodeForCharacter(_ character: String) -> CGKeyCode? {
@@ -2980,9 +3041,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func pasteAtCursorWhenShortcutReleased(completion: (() -> Void)? = nil) {
+    /// - Parameters:
+    ///   - text: The transcript string to insert.  When provided the AX fast-path
+    ///           is attempted first so that CJK IMEs are bypassed.
+    ///   - usedAXPath: Closure called with `true` if the AX path succeeded (the
+    ///                 clipboard was never consumed and need not be restored).
+    ///   - completion: Called after the paste attempt regardless of which path ran.
+    private func pasteAtCursorWhenShortcutReleased(
+        text: String? = nil,
+        usedAXPath: ((Bool) -> Void)? = nil,
+        completion: (() -> Void)? = nil
+    ) {
         performAfterShortcutReleased { [weak self] in
-            self?.pasteAtCursor()
+            let didUseAX = self?.pasteAtCursor(text: text) ?? false
+            usedAXPath?(didUseAX)
             completion?()
         }
     }
