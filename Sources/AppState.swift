@@ -25,8 +25,15 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case prompts
     case macros
     case runLog
+    case debug
 
     var id: String { rawValue }
+
+    static var visibleCases: [SettingsTab] {
+        allCases.filter { tab in
+            tab != .debug || AppBuild.isDevBundle
+        }
+    }
 
     var title: String {
         switch self {
@@ -34,6 +41,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .prompts: return "Prompts"
         case .macros: return "Voice Macros"
         case .runLog: return "Run Log"
+        case .debug: return "Debug"
         }
     }
 
@@ -43,7 +51,14 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .prompts: return "text.bubble"
         case .macros: return "music.mic"
         case .runLog: return "clock.arrow.circlepath"
+        case .debug: return "wrench.and.screwdriver"
         }
+    }
+}
+
+enum AppBuild {
+    static var isDevBundle: Bool {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String) == "FreeFlow Dev"
     }
 }
 
@@ -109,6 +124,7 @@ private struct PreservedPasteboardSnapshot {
 private struct PendingClipboardRestore {
     let snapshot: PreservedPasteboardSnapshot
     let expectedChangeCount: Int
+    let writtenTranscript: String
 }
 
 private struct TranscriptCommandParsingResult {
@@ -192,8 +208,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let contextModelStorageKey = "context_model"
     private let holdShortcutStorageKey = "hold_shortcut"
     private let toggleShortcutStorageKey = "toggle_shortcut"
+    private let copyAgainShortcutStorageKey = "copy_again_shortcut"
     private let savedHoldCustomShortcutStorageKey = "saved_hold_custom_shortcut"
     private let savedToggleCustomShortcutStorageKey = "saved_toggle_custom_shortcut"
+    private let savedCopyAgainCustomShortcutStorageKey = "saved_copy_again_custom_shortcut"
     private let customVocabularyStorageKey = "custom_vocabulary"
     private let transcriptionLanguageStorageKey = "transcription_language"
     private let selectedMicrophoneStorageKey = "selected_microphone_id"
@@ -215,7 +233,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let realtimeStreamingEnabledStorageKey = "realtime_streaming_enabled"
     private let realtimeStreamingModelStorageKey = "realtime_streaming_model"
     private let dictationAudioInterruptionEnabledStorageKey = "dictation_audio_interruption_enabled"
-    private let transcribingIndicatorDelay: TimeInterval = 0.25
     private let pasteAfterShortcutReleaseDelay: TimeInterval = 0.03
     private let pressEnterAfterPasteDelay: TimeInterval = 0.08
     private let clipboardRestoreDelay: TimeInterval = 1.0
@@ -333,6 +350,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var copyAgainShortcut: ShortcutBinding {
+        didSet {
+            persistShortcut(copyAgainShortcut, key: copyAgainShortcutStorageKey)
+            restartHotkeyMonitoring()
+        }
+    }
+
     @Published private(set) var savedHoldCustomShortcut: ShortcutBinding? {
         didSet {
             persistOptionalShortcut(savedHoldCustomShortcut, key: savedHoldCustomShortcutStorageKey)
@@ -342,6 +366,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published private(set) var savedToggleCustomShortcut: ShortcutBinding? {
         didSet {
             persistOptionalShortcut(savedToggleCustomShortcut, key: savedToggleCustomShortcutStorageKey)
+        }
+    }
+
+    @Published private(set) var savedCopyAgainCustomShortcut: ShortcutBinding? {
+        didSet {
+            persistOptionalShortcut(savedCopyAgainCustomShortcut, key: savedCopyAgainCustomShortcutStorageKey)
         }
     }
 
@@ -510,6 +540,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var selectedSettingsTab: SettingsTab? = .general
     @Published var pipelineHistory: [PipelineHistoryItem] = []
     @Published var debugStatusMessage = "Idle"
+    @Published var debugShowsUpdateReminderAfterDictation = false
     @Published var lastRawTranscript = ""
     @Published var lastPostProcessedTranscript = ""
     @Published var lastPostProcessingPrompt = ""
@@ -541,7 +572,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var audioLevelCancellable: AnyCancellable?
     private var debugOverlayTimer: Timer?
     private var recordingInitializationTimer: DispatchSourceTimer?
-    private var transcribingIndicatorTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?
     private var transcribingAudioFileName: String?
     private var contextService: AppContextService
@@ -559,6 +589,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var pendingShortcutStartTask: Task<Void, Never>?
     private var pendingShortcutStartMode: RecordingTriggerMode?
     private var realtimeService: RealtimeTranscriptionService?
+    private var automaticTerminationDisabled = false
     private var activeAudioInterruption: ActiveAudioInterruption?
     private var pendingOverlayDismissToken: UUID?
     private var shouldMonitorHotkeys = false
@@ -582,7 +613,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let contextModel = UserDefaults.standard.string(forKey: contextModelStorageKey) ?? Self.defaultContextModel
         let shortcuts = Self.loadShortcutConfiguration(
             holdKey: holdShortcutStorageKey,
-            toggleKey: toggleShortcutStorageKey
+            toggleKey: toggleShortcutStorageKey,
+            copyAgainKey: copyAgainShortcutStorageKey
         )
         let savedHoldCustomShortcut = Self.loadSavedCustomShortcut(
             forKey: savedHoldCustomShortcutStorageKey,
@@ -591,6 +623,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let savedToggleCustomShortcut = Self.loadSavedCustomShortcut(
             forKey: savedToggleCustomShortcutStorageKey,
             fallback: shortcuts.toggle.isCustom ? shortcuts.toggle : nil
+        )
+        let savedCopyAgainCustomShortcut = Self.loadSavedCustomShortcut(
+            forKey: savedCopyAgainCustomShortcutStorageKey,
+            fallback: shortcuts.copyAgain.isCustom ? shortcuts.copyAgain : nil
         )
         let customVocabulary = UserDefaults.standard.string(forKey: customVocabularyStorageKey) ?? ""
         let transcriptionLanguage = Self.normalizeTranscriptionLanguage(
@@ -673,8 +709,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.contextModel = contextModel
         self.holdShortcut = shortcuts.hold
         self.toggleShortcut = shortcuts.toggle
+        self.copyAgainShortcut = shortcuts.copyAgain
         self.savedHoldCustomShortcut = savedHoldCustomShortcut.binding
         self.savedToggleCustomShortcut = savedToggleCustomShortcut.binding
+        self.savedCopyAgainCustomShortcut = savedCopyAgainCustomShortcut.binding
         self.isCommandModeEnabled = isCommandModeEnabled
         self.commandModeStyle = commandModeStyle
         self.commandModeManualModifier = commandModeManualModifier
@@ -711,11 +749,17 @@ final class AppState: ObservableObject, @unchecked Sendable {
         if shortcuts.didUpdateToggleStoredValue {
             persistShortcut(shortcuts.toggle, key: toggleShortcutStorageKey)
         }
+        if shortcuts.didUpdateCopyAgainStoredValue {
+            persistShortcut(shortcuts.copyAgain, key: copyAgainShortcutStorageKey)
+        }
         if savedHoldCustomShortcut.didUpdateStoredValue {
             persistOptionalShortcut(savedHoldCustomShortcut.binding, key: savedHoldCustomShortcutStorageKey)
         }
         if savedToggleCustomShortcut.didUpdateStoredValue {
             persistOptionalShortcut(savedToggleCustomShortcut.binding, key: savedToggleCustomShortcutStorageKey)
+        }
+        if savedCopyAgainCustomShortcut.didUpdateStoredValue {
+            persistOptionalShortcut(savedCopyAgainCustomShortcut.binding, key: savedCopyAgainCustomShortcutStorageKey)
         }
 
         overlayManager.onStopButtonPressed = { [weak self] in
@@ -767,8 +811,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private struct StoredShortcutConfiguration {
         let hold: ShortcutBinding
         let toggle: ShortcutBinding
+        let copyAgain: ShortcutBinding
         let didUpdateHoldStoredValue: Bool
         let didUpdateToggleStoredValue: Bool
+        let didUpdateCopyAgainStoredValue: Bool
     }
 
     private struct StoredOptionalShortcut {
@@ -789,7 +835,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return defaultAPIBaseURL
     }
 
-    private static func loadShortcutConfiguration(holdKey: String, toggleKey: String) -> StoredShortcutConfiguration {
+    private static func loadShortcutConfiguration(
+        holdKey: String,
+        toggleKey: String,
+        copyAgainKey: String
+    ) -> StoredShortcutConfiguration {
         let legacyPreset = ShortcutPreset(
             rawValue: UserDefaults.standard.string(forKey: "hotkey_option") ?? ShortcutPreset.fnKey.rawValue
         ) ?? .fnKey
@@ -797,11 +847,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let toggle = hold.withAddedModifiers(.command)
         let storedHold = loadShortcut(forKey: holdKey)
         let storedToggle = loadShortcut(forKey: toggleKey)
+        let storedCopyAgain = loadShortcut(forKey: copyAgainKey)
         return StoredShortcutConfiguration(
             hold: storedHold.binding ?? hold,
             toggle: storedToggle.binding ?? toggle,
+            copyAgain: storedCopyAgain.binding ?? .disabled,
             didUpdateHoldStoredValue: storedHold.binding == nil || storedHold.didNormalize,
-            didUpdateToggleStoredValue: storedToggle.binding == nil || storedToggle.didNormalize
+            didUpdateToggleStoredValue: storedToggle.binding == nil || storedToggle.didNormalize,
+            didUpdateCopyAgainStoredValue: storedCopyAgain.didNormalize
         )
     }
 
@@ -1339,7 +1392,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     var usesFnShortcut: Bool {
-        holdShortcut.usesFnKey || toggleShortcut.usesFnKey
+        holdShortcut.usesFnKey || toggleShortcut.usesFnKey || copyAgainShortcut.usesFnKey
     }
 
     var hasEnabledHoldShortcut: Bool {
@@ -1377,6 +1430,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return savedHoldCustomShortcut
         case .toggle:
             return savedToggleCustomShortcut
+        case .copyAgain:
+            return savedCopyAgainCustomShortcut
         }
     }
 
@@ -1405,36 +1460,39 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     @discardableResult
     func setCommandModeManualModifier(_ modifier: CommandModeManualModifier) -> String? {
-        if isCommandModeEnabled,
-           commandModeStyle == .manual,
-           let message = commandModeManualModifierCollisionMessage(for: modifier) {
-            return message
-        }
-
+        // Match sibling setters: always commit, then validate.
         commandModeManualModifier = modifier
+        if isCommandModeEnabled, commandModeStyle == .manual {
+            return commandModeManualModifierCollisionMessage(for: modifier)
+        }
         return nil
     }
 
     @discardableResult
     func setShortcut(_ binding: ShortcutBinding, for role: ShortcutRole) -> String? {
         let binding = binding.normalizedForStorageMigration()
-        let nextHoldShortcut = role == .hold ? binding : holdShortcut
-        let nextToggleShortcut = role == .toggle ? binding : toggleShortcut
-        let otherBinding = role == .hold ? toggleShortcut : holdShortcut
-        if binding.isDisabled && otherBinding.isDisabled {
-            return "At least one shortcut must remain enabled."
+
+        if role == .hold || role == .toggle {
+            let otherDictationBinding = role == .hold ? toggleShortcut : holdShortcut
+            guard !binding.conflicts(with: otherDictationBinding) else {
+                return "Hold and tap shortcuts must be distinct."
+            }
         }
-        guard !binding.conflicts(with: otherBinding) else {
-            return "Hold and tap shortcuts must be distinct."
+
+        if role != .copyAgain, binding.conflicts(with: copyAgainShortcut) {
+            return "This shortcut is already used by Paste Again."
         }
-        if isCommandModeEnabled,
-           commandModeStyle == .manual,
-           let message = commandModeManualModifierCollisionMessage(
-            for: commandModeManualModifier,
-            holdBinding: nextHoldShortcut,
-            toggleBinding: nextToggleShortcut
-           ) {
-            return message
+        if role == .copyAgain {
+            if binding.conflicts(with: holdShortcut) {
+                return "Paste Again cannot share a shortcut with Hold to Talk."
+            }
+            if binding.conflicts(with: toggleShortcut) {
+                return "Paste Again cannot share a shortcut with Tap to Toggle."
+            }
+            if isCommandModeEnabled, commandModeStyle == .manual,
+               bindingCollides(binding, with: commandModeManualModifier) {
+                return "Paste Again cannot share the Edit Mode modifier."
+            }
         }
 
         switch role {
@@ -1448,6 +1506,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 savedToggleCustomShortcut = binding
             }
             toggleShortcut = binding
+        case .copyAgain:
+            if binding.isCustom {
+                savedCopyAgainCustomShortcut = binding
+            }
+            copyAgainShortcut = binding
         }
 
         return nil
@@ -1456,10 +1519,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func commandModeManualModifierCollisionMessage(
         for modifier: CommandModeManualModifier,
         holdBinding: ShortcutBinding? = nil,
-        toggleBinding: ShortcutBinding? = nil
+        toggleBinding: ShortcutBinding? = nil,
+        copyAgainBinding: ShortcutBinding? = nil
     ) -> String? {
         let holdBinding = holdBinding ?? holdShortcut
         let toggleBinding = toggleBinding ?? toggleShortcut
+        let copyAgainBinding = copyAgainBinding ?? copyAgainShortcut
         let manualModifier = modifier.shortcutModifier
 
         if !holdBinding.isDisabled && holdBinding.modifiers.contains(manualModifier) {
@@ -1468,8 +1533,42 @@ final class AppState: ObservableObject, @unchecked Sendable {
         if !toggleBinding.isDisabled && toggleBinding.modifiers.contains(manualModifier) {
             return "That modifier is already part of the tap shortcut."
         }
+        if !copyAgainBinding.isDisabled && copyAgainBinding.modifiers.contains(manualModifier) {
+            return "That modifier is already part of the Paste Again shortcut."
+        }
+        // Modifier-only bindings carry identity in keyCode, not modifiers.
+        if !holdBinding.isDisabled,
+           holdBinding.kind == .modifierKey,
+           let bindingModifier = ShortcutBinding.modifier(forKeyCode: holdBinding.keyCode),
+           bindingModifier == manualModifier {
+            return "That modifier is already the hold shortcut."
+        }
+        if !toggleBinding.isDisabled,
+           toggleBinding.kind == .modifierKey,
+           let bindingModifier = ShortcutBinding.modifier(forKeyCode: toggleBinding.keyCode),
+           bindingModifier == manualModifier {
+            return "That modifier is already the tap shortcut."
+        }
+        if !copyAgainBinding.isDisabled,
+           copyAgainBinding.kind == .modifierKey,
+           let bindingModifier = ShortcutBinding.modifier(forKeyCode: copyAgainBinding.keyCode),
+           bindingModifier == manualModifier {
+            return "That modifier is already the Paste Again shortcut."
+        }
 
         return nil
+    }
+
+    private func bindingCollides(_ binding: ShortcutBinding, with modifier: CommandModeManualModifier) -> Bool {
+        guard !binding.isDisabled else { return false }
+        let manualModifier = modifier.shortcutModifier
+        if binding.modifiers.contains(manualModifier) { return true }
+        if binding.kind == .modifierKey,
+           let bindingModifier = ShortcutBinding.modifier(forKeyCode: binding.keyCode),
+           bindingModifier == manualModifier {
+            return true
+        }
+        return false
     }
 
     func startHotkeyMonitoring() {
@@ -1514,6 +1613,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return ShortcutConfiguration(
             hold: holdShortcut,
             toggle: toggleShortcut,
+            copyAgain: copyAgainShortcut,
             permittedAdditionalExactMatchModifiers: permittedAdditionalExactMatchModifiers
         )
     }
@@ -1534,6 +1634,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private func handleShortcutEvent(_ event: ShortcutEvent) {
+        if event == .copyAgainTriggered {
+            copyLastTranscriptToPasteboard()
+            return
+        }
+
         guard let action = shortcutSessionController.handle(event: event, isTranscribing: isTranscribing) else {
             return
         }
@@ -1572,6 +1677,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         return false
+    }
+
+    /// Copies the last transcript to the pasteboard and pastes it into the
+    /// focused app — Wispr Flow style. Reuses the dictation paste pipeline so
+    /// preserveClipboard is honored and the synthetic Cmd+V waits for the
+    /// trigger shortcut to be fully released.
+    func copyLastTranscriptToPasteboard() {
+        guard !lastTranscript.isEmpty else { return }
+        let pendingClipboardRestore = writeTranscriptToPasteboard(lastTranscript)
+        pasteAtCursorWhenShortcutReleased { [weak self] in
+            self?.restoreClipboardIfNeeded(pendingClipboardRestore)
+        }
     }
 
     func toggleRecording() {
@@ -1613,6 +1730,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         tearDownRealtimeService()
         audioRecorder.cancelRecording()
         restoreAudioInterruptionIfNeeded()
+        endCriticalDictationActivity()
         refreshAvailableMicrophonesIfNeeded()
         if !isRecording && !isTranscribing && statusText == "Cancelled" {
             scheduleReadyStatusReset(after: 2, matching: ["Cancelled"])
@@ -1624,8 +1742,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         transcriptionTask?.cancel()
         transcriptionTask = nil
-        transcribingIndicatorTask?.cancel()
-        transcribingIndicatorTask = nil
         contextCaptureTask?.cancel()
         contextCaptureTask = nil
         capturedContext = nil
@@ -1643,6 +1759,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             Self.deleteAudioFile(transcribingAudioFileName)
             self.transcribingAudioFileName = nil
         }
+        endCriticalDictationActivity()
         refreshAvailableMicrophonesIfNeeded()
         if !isRecording && !isTranscribing && statusText == "Cancelled" {
             scheduleReadyStatusReset(after: 2, matching: ["Cancelled"])
@@ -1709,6 +1826,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
             }
             return .dictation
         case .manual:
+            // If the binding IS the manual modifier, the "modifier pressed"
+            // signal is the binding's own press. Fall back to plain dictation.
+            let activeBinding: ShortcutBinding = (triggerMode == .toggle) ? toggleShortcut : holdShortcut
+            if activeBinding.kind == .modifierKey,
+               let bindingModifier = ShortcutBinding.modifier(forKeyCode: activeBinding.keyCode),
+               bindingModifier == commandModeManualModifier.shortcutModifier {
+                return .dictation
+            }
             if let message = commandModeManualModifierCollisionMessage(for: commandModeManualModifier) {
                 rejectInvalidCommandModeModifier(triggerMode: triggerMode, message: message)
                 return nil
@@ -1951,8 +2076,21 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    private func beginCriticalDictationActivity() {
+        guard !automaticTerminationDisabled else { return }
+        ProcessInfo.processInfo.disableAutomaticTermination("FreeFlow dictation in progress")
+        automaticTerminationDisabled = true
+    }
+
+    private func endCriticalDictationActivity() {
+        guard automaticTerminationDisabled else { return }
+        ProcessInfo.processInfo.enableAutomaticTermination("FreeFlow dictation in progress")
+        automaticTerminationDisabled = false
+    }
+
     private func beginRecording(triggerMode: RecordingTriggerMode) {
         os_log(.info, log: recordingLog, "beginRecording() entered")
+        beginCriticalDictationActivity()
         clearPendingOverlayDismissToken()
         errorMessage = nil
 
@@ -2054,8 +2192,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         isTranscribing = false
         transcriptionTask?.cancel()
         transcriptionTask = nil
-        transcribingIndicatorTask?.cancel()
-        transcribingIndicatorTask = nil
         if let transcribingAudioFileName {
             Self.deleteAudioFile(transcribingAudioFileName)
             self.transcribingAudioFileName = nil
@@ -2063,6 +2199,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         activeRecordingTriggerMode = nil
         currentSessionIntent = .dictation
         shortcutSessionController.reset()
+        endCriticalDictationActivity()
         errorMessage = formattedRecordingStartError(error)
         statusText = "Error"
         overlayManager.dismiss()
@@ -2325,12 +2462,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
         statusText = "Preparing audio..."
         errorMessage = nil
         playAlertSound(named: "Pop")
-        overlayManager.prepareForTranscribing()
+        overlayManager.showTranscribing()
         audioRecorder.stopRecording { [weak self] fileURL in
             guard let self else { return }
             guard let fileURL else {
                 self.isTranscribing = false
                 self.audioRecorder.cleanup()
+                self.endCriticalDictationActivity()
                 self.errorMessage = "No audio recorded"
                 self.statusText = "Error"
                 self.overlayManager.dismiss()
@@ -2351,19 +2489,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
             self.statusText = "Transcribing..."
             self.debugStatusMessage = "Transcribing audio"
 
-            self.transcribingIndicatorTask?.cancel()
-            let indicatorDelay = self.transcribingIndicatorDelay
-            self.transcribingIndicatorTask = Task { [weak self] in
-                do {
-                    try await Task.sleep(nanoseconds: UInt64(indicatorDelay * 1_000_000_000))
-                    let shouldShowTranscribing = self?.isTranscribing ?? false
-                    guard shouldShowTranscribing else { return }
-                    await MainActor.run { [weak self] in
-                        self?.overlayManager.showTranscribing()
-                    }
-                } catch {}
-            }
-
         let postProcessingService = PostProcessingService(
             apiKey: apiKey,
             baseURL: apiBaseURL,
@@ -2376,14 +2501,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
             self.audioRecorder.onPCM16Samples = nil
             self.transcriptionTask?.cancel()
             guard self.isTranscribing else {
-                self.transcribingIndicatorTask?.cancel()
-                self.transcribingIndicatorTask = nil
                 if let savedAudioFile {
                     Self.deleteAudioFile(savedAudioFile.fileName)
                 }
                 self.transcribingAudioFileName = nil
                 activeRealtime?.cancel()
                 self.audioRecorder.cleanup()
+                self.endCriticalDictationActivity()
                 self.refreshAvailableMicrophonesIfNeeded()
                 return
             }
@@ -2404,6 +2528,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         pressEnterCommandEnabled: self.isPressEnterVoiceCommandEnabled
                     )
                     try Task.checkCancellation()
+                    // Capture the parsed raw transcript as lastTranscript before
+                    // post-processing runs. If anything after this throws or focus
+                    // shifts mid-paste, the Paste Again shortcut still has the raw
+                    // text instead of the previous dictation's stale value.
+                    let bootstrapTranscript = parsedTranscript.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !bootstrapTranscript.isEmpty {
+                        await MainActor.run { [weak self] in
+                            self?.lastTranscript = bootstrapTranscript
+                        }
+                    }
                     let appContext: AppContext
                     if let sessionContext {
                         appContext = sessionContext
@@ -2459,11 +2593,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             audioFileName: savedAudioFile?.fileName
                         )
                         self.transcriptionTask = nil
-                        self.transcribingIndicatorTask?.cancel()
-                        self.transcribingIndicatorTask = nil
                         self.transcribingAudioFileName = nil
                         self.lastTranscript = trimmedFinalTranscript
                         self.isTranscribing = false
+                        self.endCriticalDictationActivity()
                         self.debugStatusMessage = "Done"
                         let completionStatusText = self.preserveClipboard ? "Pasted at cursor!" : "Copied to clipboard!"
                         let enterOnlyStatusText = "Pressed Enter"
@@ -2540,6 +2673,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 } catch is CancellationError {
                     await MainActor.run {
                         self.transcriptionTask = nil
+                        self.endCriticalDictationActivity()
                     }
                 } catch {
                     let resolvedContext: AppContext
@@ -2553,11 +2687,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     await MainActor.run {
                         guard self.isTranscribing else { return }
                         self.transcriptionTask = nil
-                        self.transcribingIndicatorTask?.cancel()
-                        self.transcribingIndicatorTask = nil
                         self.transcribingAudioFileName = nil
                         self.errorMessage = error.localizedDescription
                         self.isTranscribing = false
+                        self.endCriticalDictationActivity()
                         self.statusText = "Error"
                         self.overlayManager.dismiss()
                         self.lastPostProcessedTranscript = ""
@@ -2789,6 +2922,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             restoreAudioInterruptionIfNeeded()
             shortcutSessionController.reset()
             activeRecordingTriggerMode = nil
+            endCriticalDictationActivity()
             statusText = "Screenshot Required"
             overlayManager.dismiss()
 
@@ -2800,7 +2934,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func isScreenCapturePermissionError(_ message: String) -> Bool {
         let lowered = message.lowercased()
-        return lowered.contains("permission") || lowered.contains("screen recording")
+        return lowered.contains("screen recording permission not granted")
+            || lowered.contains("requires screen recording permission")
     }
 
     private func showScreenshotPermissionAlert(message: String) {
@@ -2868,6 +3003,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     @MainActor
     private func showPostTranscriptionUpdateReminderIfNeeded() -> Bool {
+        if debugShowsUpdateReminderAfterDictation {
+            showDebugUpdateAvailableOverlay()
+            return true
+        }
+
         let updateManager = UpdateManager.shared
         guard updateManager.shouldShowPostTranscriptionReminder() else { return false }
 
@@ -2883,6 +3023,24 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         return true
+    }
+
+    @MainActor
+    func showDebugUpdateAvailableOverlay() {
+        let updateManager = UpdateManager.shared
+        let version = updateManager.latestReleaseVersion.isEmpty ? "9.9.9" : updateManager.latestReleaseVersion
+        let dismissToken = UUID()
+        if isDebugOverlayActive || debugOverlayTimer != nil {
+            stopDebugOverlay()
+        }
+        pendingOverlayDismissToken = dismissToken
+        overlayManager.showUpdateAvailable(version: version)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + postTranscriptionUpdateReminderDuration) { [weak self] in
+            guard let self, self.pendingOverlayDismissToken == dismissToken else { return }
+            self.pendingOverlayDismissToken = nil
+            self.overlayManager.dismiss()
+        }
     }
 
     @MainActor
@@ -3004,15 +3162,58 @@ final class AppState: ObservableObject, @unchecked Sendable {
         keyUp?.post(tap: .cgSessionEventTap)
     }
 
+    /// Writes the final transcript to the system pasteboard.
+    /// Also handles appending necessary trailing spaces, declaring transient
+    /// types for clipboard managers, and saving the clipboard state for later restoration.
+    /// - Parameter transcript: The text to be pasted.
+    /// - Returns: A `PendingClipboardRestore` object if clipboard preservation is enabled, otherwise nil.
     private func writeTranscriptToPasteboard(_ transcript: String) -> PendingClipboardRestore? {
         let pasteboard = NSPasteboard.general
         let snapshot = preserveClipboard ? PreservedPasteboardSnapshot(pasteboard: pasteboard) : nil
 
-        pasteboard.clearContents()
-        pasteboard.setString(transcript, forType: .string)
+        // Append a space when ending with sentence-ending punctuation so the
+        // next dictation does not jam against the prior period.
+        let textToWrite: String
+        if let last = transcript.last, ".!?".contains(last) {
+            textToWrite = transcript + " "
+        } else {
+            textToWrite = transcript
+        }
+
+        // Declare standard transient types alongside .string so well-behaved
+        // clipboard managers (Maccy, Raycast, Paste, Clipy, Flycut, etc.) skip
+        // recording this entry in their history. The text still pastes normally
+        // via Cmd-V — only clipboard history is affected.
+        //
+        // See: https://github.com/nicke5012/TransientPasteboardType
+        let transientType = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
+        let concealedType = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+        let autoGeneratedType = NSPasteboard.PasteboardType("org.nspasteboard.AutoGeneratedType")
+        let legacyTransientType = NSPasteboard.PasteboardType("de.petermaurer.TransientPasteboardType")
+
+        pasteboard.declareTypes([
+            .string,
+            transientType,
+            concealedType,
+            autoGeneratedType,
+            legacyTransientType
+        ], owner: nil)
+
+        pasteboard.setString(textToWrite, forType: .string)
+
+        // Populate empty values for the marker types — some clipboard managers
+        // check the data presence rather than just the declared type.
+        pasteboard.setString("", forType: transientType)
+        pasteboard.setString("", forType: concealedType)
+        pasteboard.setString("", forType: autoGeneratedType)
+        pasteboard.setString("", forType: legacyTransientType)
 
         guard let snapshot else { return nil }
-        return PendingClipboardRestore(snapshot: snapshot, expectedChangeCount: pasteboard.changeCount)
+        return PendingClipboardRestore(
+            snapshot: snapshot,
+            expectedChangeCount: pasteboard.changeCount,
+            writtenTranscript: textToWrite
+        )
     }
 
     private func restoreClipboardIfNeeded(_ pendingRestore: PendingClipboardRestore?) {
@@ -3022,7 +3223,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
         // the pre-dictation clipboard instead of the transcript.
         DispatchQueue.main.asyncAfter(deadline: .now() + clipboardRestoreDelay) {
             let pasteboard = NSPasteboard.general
-            guard pasteboard.changeCount == pendingRestore.expectedChangeCount else { return }
+            // A bare changeCount check is too strict: browsers, iCloud Universal
+            // Clipboard sync, and other background apps bump the change count
+            // without the user copying anything, which left the transcript
+            // stranded on the clipboard. Restore when nothing changed, or when the
+            // clipboard still holds exactly the transcript we wrote (so the user
+            // has not deliberately copied something new that we would clobber).
+            let clipboardStillHoldsTranscript =
+                pasteboard.string(forType: .string) == pendingRestore.writtenTranscript
+            guard pasteboard.changeCount == pendingRestore.expectedChangeCount
+                || clipboardStillHoldsTranscript else { return }
             pendingRestore.snapshot.restore(to: pasteboard)
         }
     }
