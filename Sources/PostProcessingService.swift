@@ -138,6 +138,7 @@ Behavior:
         transcript: String,
         context: AppContext,
         customVocabulary: String,
+        dictionaryEntries: [DictionaryEntry] = [],
         customSystemPrompt: String = "",
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
@@ -153,6 +154,7 @@ Behavior:
                     transcript: transcript,
                     contextSummary: context.contextSummary,
                     customVocabulary: vocabularyTerms,
+                    dictionaryEntries: dictionaryEntries,
                     customSystemPrompt: customSystemPrompt,
                     outputLanguage: outputLanguage
                 )
@@ -181,6 +183,7 @@ Behavior:
         voiceCommand: String,
         context: AppContext,
         customVocabulary: String,
+        dictionaryEntries: [DictionaryEntry] = [],
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
         let vocabularyTerms = mergedVocabularyTerms(rawVocabulary: customVocabulary)
@@ -204,6 +207,7 @@ Behavior:
                     voiceCommand: voiceCommand,
                     contextSummary: context.contextSummary,
                     customVocabulary: vocabularyTerms,
+                    dictionaryEntries: dictionaryEntries,
                     outputLanguage: outputLanguage
                 )
             }
@@ -230,6 +234,7 @@ Behavior:
         transcript: String,
         contextSummary: String,
         customVocabulary: [String],
+        dictionaryEntries: [DictionaryEntry] = [],
         customSystemPrompt: String = "",
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
@@ -241,6 +246,7 @@ Behavior:
                 contextSummary: contextSummary,
                 model: primaryModel,
                 customVocabulary: customVocabulary,
+                dictionaryEntries: dictionaryEntries,
                 customSystemPrompt: customSystemPrompt,
                 outputLanguage: outputLanguage
             )
@@ -268,6 +274,7 @@ Behavior:
                 contextSummary: contextSummary,
                 model: retryModel,
                 customVocabulary: customVocabulary,
+                dictionaryEntries: dictionaryEntries,
                 customSystemPrompt: customSystemPrompt,
                 outputLanguage: outputLanguage
             )
@@ -279,6 +286,7 @@ Behavior:
         voiceCommand: String,
         contextSummary: String,
         customVocabulary: [String],
+        dictionaryEntries: [DictionaryEntry] = [],
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
         let primaryModel = resolvedPrimaryModel()
@@ -290,6 +298,7 @@ Behavior:
                 contextSummary: contextSummary,
                 model: primaryModel,
                 customVocabulary: customVocabulary,
+                dictionaryEntries: dictionaryEntries,
                 outputLanguage: outputLanguage
             )
         } catch let error as PostProcessingError {
@@ -317,6 +326,7 @@ Behavior:
                 contextSummary: contextSummary,
                 model: retryModel,
                 customVocabulary: customVocabulary,
+                dictionaryEntries: dictionaryEntries,
                 outputLanguage: outputLanguage
             )
         }
@@ -344,6 +354,7 @@ Behavior:
         contextSummary: String,
         model: String,
         customVocabulary: [String],
+        dictionaryEntries: [DictionaryEntry] = [],
         customSystemPrompt: String = "",
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
@@ -364,6 +375,8 @@ Use these spellings exactly in the output when relevant:
             ""
         }
 
+        let dictionaryPrompt = buildDictionaryPrompt(dictionaryEntries)
+
         var systemPrompt = customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? Self.defaultSystemPrompt
             : customSystemPrompt
@@ -373,6 +386,9 @@ Use these spellings exactly in the output when relevant:
         }
         if !vocabularyPrompt.isEmpty {
             systemPrompt += "\n\n" + vocabularyPrompt
+        }
+        if !dictionaryPrompt.isEmpty {
+            systemPrompt += "\n\n" + dictionaryPrompt
         }
 
         let userMessage = """
@@ -450,6 +466,7 @@ Model: \(model)
         contextSummary: String,
         model: String,
         customVocabulary: [String],
+        dictionaryEntries: [DictionaryEntry] = [],
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
         var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
@@ -469,6 +486,8 @@ Use these spellings exactly in the output when relevant:
             ""
         }
 
+        let dictionaryPrompt = buildDictionaryPrompt(dictionaryEntries)
+
         var systemPrompt = Self.commandModeSystemPrompt
         let trimmedOutputLanguage = outputLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedOutputLanguage.isEmpty {
@@ -479,6 +498,9 @@ Use these spellings exactly in the output when relevant:
         }
         if !vocabularyPrompt.isEmpty {
             systemPrompt += "\n\n" + vocabularyPrompt
+        }
+        if !dictionaryPrompt.isEmpty {
+            systemPrompt += "\n\n" + dictionaryPrompt
         }
 
         let userMessage = """
@@ -596,5 +618,33 @@ Model: \(model)
 
         guard !terms.isEmpty else { return "" }
         return terms.joined(separator: ", ")
+    }
+
+    /// Builds the dictionary correction prompt section.
+    ///
+    /// Entries with variants produce explicit "heard → correct" mapping lines so
+    /// the model knows exactly which mishearing to replace. Entries without
+    /// variants are listed as plain terms (same as the existing vocabulary list).
+    private func buildDictionaryPrompt(_ entries: [DictionaryEntry]) -> String {
+        let mapped = entries.compactMap { entry -> String? in
+            let term = entry.term.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !term.isEmpty else { return nil }
+            let activeVariants = entry.variants
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if activeVariants.isEmpty {
+                return "- \"\(term)\""
+            } else {
+                return activeVariants.map { variant in
+                    "- \"\(variant)\" → \"\(term)\""
+                }.joined(separator: "\n")
+            }
+        }
+        guard !mapped.isEmpty else { return "" }
+        return """
+The following dictionary corrections must be applied to the transcript.
+When you encounter a listed heard form, replace it with the correct form:
+\(mapped.joined(separator: "\n"))
+"""
     }
 }

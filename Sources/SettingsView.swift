@@ -656,6 +656,9 @@ struct GeneralSettingsView: View {
                 SettingsCard("Custom Vocabulary", icon: "text.book.closed.fill") {
                     vocabularySection
                 }
+                SettingsCard("Dictionary", icon: "character.book.closed.fill") {
+                    DictionarySettingsSection()
+                }
                 SettingsCard("Permissions", icon: "lock.shield.fill") {
                     permissionsSection
                 }
@@ -1293,6 +1296,140 @@ struct GeneralSettingsView: View {
         micPermissionGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
     }
 
+}
+
+// MARK: - Dictionary Settings Section
+
+struct DictionarySettingsSection: View {
+    @EnvironmentObject var appState: AppState
+    @State private var newTermInput: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Map how the speech model hears a word to its correct form. The LLM uses these exact pairs during cleanup.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if appState.dictionaryEntries.isEmpty {
+                VStack {
+                    Image(systemName: "character.book.closed")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.tertiary)
+                        .padding(.bottom, 4)
+                    Text("No Dictionary Entries Yet")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    Text("Add terms below to help the LLM recognize and fix common mishearings.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach($appState.dictionaryEntries) { $entry in
+                        DictionaryEntryRow(entry: $entry, onDelete: {
+                            appState.dictionaryEntries.removeAll { $0.id == entry.id }
+                        })
+                    }
+                }
+            }
+
+            Divider()
+
+            HStack(spacing: 8) {
+                TextField("Add term (e.g. Claude Code)", text: $newTermInput)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { addNewTerm() }
+                Button("Add") { addNewTerm() }
+                    .disabled(newTermInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
+    private func addNewTerm() {
+        let trimmed = newTermInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        appState.dictionaryEntries.append(DictionaryEntry(term: trimmed))
+        newTermInput = ""
+    }
+}
+
+struct DictionaryEntryRow: View {
+    @Binding var entry: DictionaryEntry
+    let onDelete: () -> Void
+    @State private var newVariantInput: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(entry.term)
+                    .font(.headline)
+                Spacer()
+                Button("Delete") { onDelete() }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            if !entry.variants.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(entry.variants.enumerated()), id: \.offset) { index, variant in
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.right")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text("\"\(variant)\"")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("→")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                            Text("\"\(entry.term)\"")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button {
+                                entry.variants.remove(at: index)
+                            } label: {
+                                Image(systemName: "minus.circle")
+                                    .foregroundStyle(.red)
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.leading, 4)
+            }
+
+            HStack(spacing: 6) {
+                TextField("Heard as (e.g. cloud code)", text: $newVariantInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+                    .onSubmit { addVariant() }
+                Button("Add Variant") { addVariant() }
+                    .font(.caption)
+                    .disabled(newVariantInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.8))
+        .cornerRadius(8)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+    }
+
+    private func addVariant() {
+        let trimmed = newVariantInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard !entry.variants.contains(trimmed) else {
+            newVariantInput = ""
+            return
+        }
+        entry.variants.append(trimmed)
+        newVariantInput = ""
+    }
 }
 
 // MARK: - Microphone Option Row

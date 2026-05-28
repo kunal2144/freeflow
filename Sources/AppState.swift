@@ -9,6 +9,12 @@ import Carbon
 import os.log
 private let recordingLog = OSLog(subsystem: "com.zachlatta.freeflow", category: "Recording")
 
+struct DictionaryEntry: Codable, Identifiable, Equatable {
+    var id: UUID = UUID()
+    var term: String
+    var variants: [String] = []
+}
+
 struct VoiceMacro: Codable, Identifiable, Equatable {
     var id: UUID = UUID()
     var command: String
@@ -208,6 +214,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let alertSoundsEnabledStorageKey = "alert_sounds_enabled"
     private let soundVolumeStorageKey = "sound_volume"
     private let voiceMacrosStorageKey = "voice_macros"
+    private let dictionaryEntriesStorageKey = "dictionary_entries"
     private let commandModeEnabledStorageKey = "command_mode_enabled"
     private let commandModeStyleStorageKey = "command_mode_style"
     private let commandModeManualModifierStorageKey = "command_mode_manual_modifier"
@@ -493,6 +500,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var dictionaryEntries: [DictionaryEntry] = [] {
+        didSet {
+            if let data = try? JSONEncoder().encode(dictionaryEntries) {
+                UserDefaults.standard.set(data, forKey: dictionaryEntriesStorageKey)
+            }
+        }
+    }
+
     @Published var isRecording = false {
         didSet {
             guard oldValue != isRecording else { return }
@@ -640,6 +655,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
             initialMacros = []
         }
 
+        let initialDictionaryEntries: [DictionaryEntry]
+        if let data = UserDefaults.standard.data(forKey: "dictionary_entries"),
+           let decoded = try? JSONDecoder().decode([DictionaryEntry].self, from: data) {
+            initialDictionaryEntries = decoded
+        } else {
+            initialDictionaryEntries = []
+        }
+
         let initialAccessibility = AXIsProcessTrusted()
         let initialScreenCapturePermission = CGPreflightScreenCaptureAccess()
         var removedAudioFileNames: [String] = []
@@ -695,6 +718,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.alertSoundsEnabled = alertSoundsEnabled
         self.soundVolume = soundVolume
         self.voiceMacros = initialMacros
+        self.dictionaryEntries = initialDictionaryEntries
         self.pipelineHistory = savedHistory
         self.hasAccessibility = initialAccessibility
         self.hasScreenRecordingPermission = initialScreenCapturePermission
@@ -1079,6 +1103,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         )
         let capturedCustomVocabulary = customVocabulary
         let capturedCustomSystemPrompt = customSystemPrompt
+        let capturedDictionaryEntries = dictionaryEntries
 
         Task {
             do {
@@ -1102,6 +1127,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     context: restoredContext,
                     postProcessingService: postProcessingService,
                     customVocabulary: capturedCustomVocabulary,
+                    dictionaryEntries: capturedDictionaryEntries,
                     customSystemPrompt: capturedCustomSystemPrompt,
                     outputLanguage: self.outputLanguage
                 )
@@ -2224,6 +2250,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         context: AppContext,
         postProcessingService: PostProcessingService,
         customVocabulary: String,
+        dictionaryEntries: [DictionaryEntry] = [],
         customSystemPrompt: String,
         outputLanguage: String = ""
     ) async -> (finalTranscript: String, outcome: TranscriptProcessingOutcome, prompt: String) {
@@ -2240,6 +2267,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     voiceCommand: rawTranscript,
                     context: context,
                     customVocabulary: customVocabulary,
+                    dictionaryEntries: dictionaryEntries,
                     outputLanguage: outputLanguage
                 )
                 return (result.transcript, .commandModeSucceeded(invocation: invocation), result.prompt)
@@ -2253,12 +2281,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
             os_log(.info, log: recordingLog, "Voice macro triggered: %{public}@", macro.command)
             return (macro.payload, .voiceMacro(command: macro.command), "")
         }
-        
+
         do {
             let result = try await postProcessingService.postProcess(
                 transcript: trimmedRawTranscript,
                 context: context,
                 customVocabulary: customVocabulary,
+                dictionaryEntries: dictionaryEntries,
                 customSystemPrompt: customSystemPrompt,
                 outputLanguage: outputLanguage
             )
@@ -2422,6 +2451,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         context: appContext,
                         postProcessingService: postProcessingService,
                         customVocabulary: self.customVocabulary,
+                        dictionaryEntries: self.dictionaryEntries,
                         customSystemPrompt: self.customSystemPrompt,
                         outputLanguage: self.outputLanguage
                     )
