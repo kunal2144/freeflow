@@ -63,9 +63,11 @@ struct SetupView: View {
         case screenRecording
         case holdShortcut
         case toggleShortcut
+        case copyAgainShortcut
         case commandMode
         case vocabulary
         case launchAtLogin
+        case overlayStyle
         case testTranscription
         case ready
     }
@@ -98,13 +100,16 @@ struct SetupView: View {
     @State private var testMicPulsing = false
     @State private var holdShortcutValidationMessage: String?
     @State private var toggleShortcutValidationMessage: String?
+    @State private var copyAgainShortcutValidationMessage: String?
     @State private var isCapturingHoldShortcut = false
     @State private var isCapturingToggleShortcut = false
+    @State private var isCapturingCopyAgainShortcut = false
     @StateObject private var testHotkeyHarness = SetupTestHotkeyHarness()
+    @AppStorage("use_compact_overlay") private var useCompactOverlay = true
 
     private let totalSteps: [SetupStep] = SetupStep.allCases
     private var isCapturingShortcut: Bool {
-        isCapturingHoldShortcut || isCapturingToggleShortcut
+        isCapturingHoldShortcut || isCapturingToggleShortcut || isCapturingCopyAgainShortcut
     }
 
     var body: some View {
@@ -240,10 +245,14 @@ struct SetupView: View {
             holdShortcutStep
         case .toggleShortcut:
             toggleShortcutStep
+        case .copyAgainShortcut:
+            copyAgainShortcutStep
         case .commandMode:
             commandModeStep
         case .vocabulary:
             vocabularyStep
+        case .overlayStyle:
+            overlayStyleStep
         case .launchAtLogin:
             launchAtLoginStep
         case .testTranscription:
@@ -327,15 +336,15 @@ struct SetupView: View {
                     .buttonStyle(.plain)
                 }
 
-                if !githubCache.recentStargazers.isEmpty {
+                if !githubCache.recentContributors.isEmpty {
                     Divider()
                     HStack(spacing: 8) {
                         HStack(spacing: -6) {
-                            ForEach(githubCache.recentStargazers) { star in
+                            ForEach(githubCache.recentContributors) { contributor in
                                 Button {
-                                    openURL(star.user.htmlUrl)
+                                    openURL(contributor.htmlUrl)
                                 } label: {
-                                    AsyncImage(url: star.user.avatarThumbnailUrl) { phase in
+                                    AsyncImage(url: contributor.avatarThumbnailUrl) { phase in
                                         switch phase {
                                         case .success(let image):
                                             image.resizable().aspectRatio(contentMode: .fill)
@@ -348,10 +357,12 @@ struct SetupView: View {
                                     .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel(Text(contributor.login))
+                                .accessibilityHint(Text("Open contributor profile"))
                             }
                         }
                         .clipped()
-                        Text("recently starred")
+                        Text("recent contributors")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .fixedSize()
@@ -673,6 +684,41 @@ struct SetupView: View {
         }
     }
 
+    var copyAgainShortcutStep: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "doc.on.clipboard")
+                .font(.system(size: 60))
+                .foregroundStyle(.blue)
+
+            Text("Paste Again Shortcut")
+                .font(.title)
+                .fontWeight(.bold)
+
+            Text("Optional. Choose a shortcut to paste your last transcript again into the active text field, without opening the menu bar. Leave disabled if you do not want one.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ShortcutRoleSection(
+                role: .copyAgain,
+                selection: appState.copyAgainShortcut,
+                validationMessage: copyAgainShortcutValidationMessage,
+                isCapturing: $isCapturingCopyAgainShortcut,
+                onSelect: { binding in
+                    copyAgainShortcutValidationMessage = appState.setShortcut(binding, for: .copyAgain)
+                }
+            )
+                .padding(.top, 10)
+
+            if appState.copyAgainShortcut.usesFnKey {
+                Text("Tip: If Fn opens Emoji picker, go to System Settings > Keyboard and change \"Press fn key to\" to \"Do Nothing\".")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+            }
+        }
+    }
+
     var vocabularyStep: some View {
         VStack(spacing: 20) {
             Image(systemName: "text.book.closed.fill")
@@ -812,6 +858,39 @@ struct SetupView: View {
             .background(Color(nsColor: .controlBackgroundColor))
             .cornerRadius(8)
 
+        }
+    }
+
+    var overlayStyleStep: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "rectangle.dashed")
+                .font(.system(size: 60))
+                .foregroundStyle(.blue)
+
+            Text("Recording overlay style")
+                .font(.title)
+                .fontWeight(.bold)
+
+            Text("Choose how the recording indicator looks while \(AppName.displayName) is dictating. You can change this later in Settings.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(spacing: 10) {
+                OverlayStyleOptionRow(
+                    title: "Minimalist menu-bar overlay",
+                    subtitle: "Two slim wings flank the camera notch and stay inside the menu bar. Never covers app tabs or toolbars.",
+                    isMinimalist: true,
+                    selection: $useCompactOverlay
+                )
+                OverlayStyleOptionRow(
+                    title: "Drop-down pill",
+                    subtitle: "Single pill hangs below the menu bar during recording. Larger and more visible, but covers a thin strip of whatever app is active.",
+                    isMinimalist: false,
+                    selection: $useCompactOverlay
+                )
+            }
+            .padding(.top, 6)
         }
     }
 
@@ -1317,12 +1396,32 @@ struct GitHubStarUser: Decodable {
     }
 }
 
+struct GitHubContributor: Decodable, Identifiable {
+    let id: Int
+    let login: String
+    let avatarUrl: URL
+    let htmlUrl: URL
+
+    var avatarThumbnailUrl: URL {
+        let separator = avatarUrl.absoluteString.contains("?") ? "&" : "?"
+        return URL(string: avatarUrl.absoluteString + "\(separator)s=44") ?? avatarUrl
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case login
+        case avatarUrl = "avatar_url"
+        case htmlUrl = "html_url"
+    }
+}
+
 @MainActor
 class GitHubMetadataCache: ObservableObject {
     static let shared = GitHubMetadataCache()
 
     @Published var starCount: Int?
     @Published var recentStargazers: [GitHubStarRecord] = []
+    @Published var recentContributors: [GitHubContributor] = []
     @Published var isLoading = true
 
     private var lastFetchDate: Date?
@@ -1361,8 +1460,21 @@ class GitHubMetadataCache: ObservableObject {
                 }
             }
 
+            var contributors: [GitHubContributor] = []
+            let contributorsURL = URL(string: "https://api.github.com/repos/zachlatta/freeflow/contributors?per_page=15")!
+            do {
+                let contributorsResult = try await URLSession.shared.data(from: contributorsURL)
+                if let contribHTTP = contributorsResult.1 as? HTTPURLResponse,
+                   (200..<300).contains(contribHTTP.statusCode) {
+                    contributors = try JSONDecoder().decode([GitHubContributor].self, from: contributorsResult.0)
+                }
+            } catch {
+                contributors = []
+            }
+
             starCount = count
             recentStargazers = recent
+            recentContributors = contributors
             isLoading = false
             lastFetchDate = Date()
         } catch {
@@ -1403,5 +1515,135 @@ struct HowToRow: View {
             Text(text)
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+/// Mini visual preview of one overlay style for the setup-flow option cards.
+/// Stylized MacBook top edge with the recording UI drawn as wings or pill.
+struct OverlayStylePreview: View {
+    let isMinimalist: Bool
+
+    private let frameWidth: CGFloat = 110
+    private let frameHeight: CGFloat = 56
+    private let menuBarHeight: CGFloat = 8
+    private let notchWidth: CGFloat = 26
+    private let notchHeight: CGFloat = 8
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            // Screen background — represents the host app behind the bar.
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.primary.opacity(0.15), lineWidth: 0.5)
+                )
+
+            // Menu bar strip.
+            Rectangle()
+                .fill(Color.primary.opacity(0.10))
+                .frame(height: menuBarHeight)
+
+            // Tab strip stand-in below menu bar (so collisions read).
+            HStack(spacing: 3) {
+                ForEach(0..<5, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color.primary.opacity(0.18))
+                        .frame(height: 5)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.top, menuBarHeight + 4)
+
+            // Notch (always visible).
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: 3,
+                bottomTrailingRadius: 3,
+                topTrailingRadius: 0
+            )
+            .fill(Color.black)
+            .frame(width: notchWidth, height: notchHeight)
+
+            // Style-specific overlay rendering.
+            if isMinimalist {
+                // Two slim wings flanking the notch, inside menu bar height.
+                HStack(spacing: notchWidth) {
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 0,
+                        bottomLeadingRadius: 3,
+                        bottomTrailingRadius: 0,
+                        topTrailingRadius: 0
+                    )
+                    .fill(Color.black)
+                    .frame(width: 16, height: notchHeight)
+
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 0,
+                        bottomLeadingRadius: 0,
+                        bottomTrailingRadius: 3,
+                        topTrailingRadius: 0
+                    )
+                    .fill(Color.black)
+                    .frame(width: 16, height: notchHeight)
+                }
+            } else {
+                // Drop-down pill hanging below the menu bar from the notch.
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 0,
+                    bottomLeadingRadius: 5,
+                    bottomTrailingRadius: 5,
+                    topTrailingRadius: 0
+                )
+                .fill(Color.black)
+                .frame(width: notchWidth + 10, height: notchHeight + 12)
+            }
+        }
+        .frame(width: frameWidth, height: frameHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+/// Shared picker row used by both Setup and Settings so the UI matches in both.
+struct OverlayStyleOptionRow: View {
+    let title: String
+    let subtitle: String
+    let isMinimalist: Bool
+    @Binding var selection: Bool
+
+    var body: some View {
+        let isSelected = (selection == isMinimalist)
+        Button(action: {
+            selection = isMinimalist
+        }) {
+            HStack(alignment: .center, spacing: 14) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(isSelected ? Color.blue : Color.secondary)
+
+                OverlayStylePreview(isMinimalist: isMinimalist)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 }

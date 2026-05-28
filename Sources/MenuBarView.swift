@@ -8,6 +8,44 @@ struct MenuBarView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     }
 
+    private var recentHistoryItems: [PipelineHistoryItem] {
+        Array(appState.pipelineHistory.filter { !transcriptText(for: $0).isEmpty }.prefix(10))
+    }
+
+    private func transcriptText(for item: PipelineHistoryItem) -> String {
+        let cleaned = item.postProcessedTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleaned.isEmpty {
+            return cleaned
+        }
+        return item.rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func transcriptFull(for item: PipelineHistoryItem) -> String {
+        if !item.postProcessedTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return item.postProcessedTranscript
+        }
+        return item.rawTranscript
+    }
+
+    private func transcriptSnippet(for item: PipelineHistoryItem) -> String {
+        let text = transcriptText(for: item)
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "(no transcript)" }
+        return text.count > 48 ? String(text.prefix(48)) + "..." : text
+    }
+
+    private func copyTranscriptToPasteboard(_ transcript: String) {
+        guard !transcript.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(transcript, forType: .string)
+    }
+
+    private func openRunLog() {
+        appState.selectedSettingsTab = .runLog
+        NotificationCenter.default.post(name: .showSettings, object: nil)
+    }
+
     var body: some View {
         VStack(spacing: 4) {
             Text("\(AppName.displayName) v\(appVersion)")
@@ -98,20 +136,45 @@ struct MenuBarView: View {
                     .lineLimit(3)
             }
 
+            Divider()
+
             if !appState.lastTranscript.isEmpty && !appState.isRecording && !appState.isTranscribing {
-                Divider()
-                Text(appState.lastTranscript.count > 35
+                Button(appState.copyAgainShortcut.isDisabled
+                    ? "Paste Again"
+                    : "Paste Again  (\(appState.copyAgainShortcut.displayName))") {
+                    appState.copyLastTranscriptToPasteboard()
+                }
+
+                let truncatedTranscript = appState.lastTranscript.count > 35
                     ? String(appState.lastTranscript.prefix(35)) + "…"
-                    : appState.lastTranscript)
+                    : appState.lastTranscript
+                Text("\u{201C}\(truncatedTranscript)\u{201D}")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 16)
                     .lineLimit(4)
                     .frame(maxWidth: 280, alignment: .leading)
+            }
 
-                Button("Copy Again") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(appState.lastTranscript, forType: .string)
+            Menu("History") {
+                if recentHistoryItems.isEmpty {
+                    Text("No transcripts yet")
+                } else {
+                    ForEach(recentHistoryItems) { item in
+                        let transcript = transcriptText(for: item)
+                        Button {
+                            copyTranscriptToPasteboard(transcriptFull(for: item))
+                        } label: {
+                            Text(transcriptSnippet(for: item))
+                        }
+                        .disabled(transcript.isEmpty)
+                    }
+
+                    Divider()
+                }
+
+                Button("Open Run Log") {
+                    openRunLog()
                 }
             }
 
@@ -127,7 +190,6 @@ struct MenuBarView: View {
                         Text("  Disabled")
                     }
                 }
-                .disabled(appState.toggleShortcut.isDisabled)
 
                 ForEach(ShortcutPreset.allCases) { preset in
                     Button {
@@ -172,7 +234,6 @@ struct MenuBarView: View {
                         Text("  Disabled")
                     }
                 }
-                .disabled(appState.holdShortcut.isDisabled)
 
                 ForEach(ShortcutPreset.allCases) { preset in
                     Button {
@@ -193,6 +254,50 @@ struct MenuBarView: View {
                         _ = appState.setShortcut(savedCustomShortcut, for: .toggle)
                     } label: {
                         if appState.toggleShortcut == savedCustomShortcut {
+                            Text("✓ Custom: \(savedCustomShortcut.displayName)")
+                        } else {
+                            Text("  Custom: \(savedCustomShortcut.displayName)")
+                        }
+                    }
+                }
+
+                Divider()
+                Button("Customize…") {
+                    appState.selectedSettingsTab = .general
+                    NotificationCenter.default.post(name: .showSettings, object: nil)
+                }
+            }
+
+            Menu("Paste Again Shortcut") {
+                Button {
+                    _ = appState.setShortcut(.disabled, for: .copyAgain)
+                } label: {
+                    if appState.copyAgainShortcut.isDisabled {
+                        Text("✓ Disabled")
+                    } else {
+                        Text("  Disabled")
+                    }
+                }
+
+                ForEach(ShortcutPreset.allCases) { preset in
+                    Button {
+                        _ = appState.setShortcut(preset.binding, for: .copyAgain)
+                    } label: {
+                        if appState.copyAgainShortcut == preset.binding {
+                            Text("✓ \(preset.title)")
+                        } else {
+                            Text("  \(preset.title)")
+                        }
+                    }
+                    .disabled(preset.binding == appState.holdShortcut || preset.binding == appState.toggleShortcut)
+                }
+
+                if let savedCustomShortcut = appState.savedCustomShortcut(for: .copyAgain) {
+                    Divider()
+                    Button {
+                        _ = appState.setShortcut(savedCustomShortcut, for: .copyAgain)
+                    } label: {
+                        if appState.copyAgainShortcut == savedCustomShortcut {
                             Text("✓ Custom: \(savedCustomShortcut.displayName)")
                         } else {
                             Text("  Custom: \(savedCustomShortcut.displayName)")
@@ -238,11 +343,20 @@ struct MenuBarView: View {
                 NotificationCenter.default.post(name: .showSettings, object: nil)
             }
 
-            Divider()
-
-            Button(appState.isDebugOverlayActive ? "Stop Debug Overlay" : "Debug Overlay") {
-                appState.toggleDebugOverlay()
+            Button {
+                Task {
+                    await updateManager.checkForUpdates(userInitiated: true)
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    if updateManager.isChecking {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(updateManager.isChecking ? "Checking for Updates..." : "Check for Updates")
+                }
             }
+            .disabled(updateManager.isChecking)
 
             if updateManager.updateAvailable {
                 Divider()
