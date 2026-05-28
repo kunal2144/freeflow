@@ -7,6 +7,7 @@ final class RecordingOverlayState: ObservableObject {
     @Published var phase: OverlayPhase = .recording
     @Published var audioLevel: Float = 0.0
     @Published var recordingTriggerMode: RecordingTriggerMode = .hold
+    @Published var isControlMode: Bool = false
 }
 
 enum OverlayPhase {
@@ -83,27 +84,30 @@ final class RecordingOverlayManager {
         overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle
     }
 
-    func showInitializing(mode: RecordingTriggerMode = .hold) {
+    func showInitializing(mode: RecordingTriggerMode = .hold, isControlMode: Bool = false) {
         DispatchQueue.main.async {
             self.overlayState.recordingTriggerMode = mode
+            self.overlayState.isControlMode = isControlMode
             self.overlayState.phase = .initializing
             self.overlayState.audioLevel = 0
             self.showOverlayPanel(animatedResize: false)
         }
     }
 
-    func showRecording(mode: RecordingTriggerMode = .hold) {
+    func showRecording(mode: RecordingTriggerMode = .hold, isControlMode: Bool = false) {
         DispatchQueue.main.async {
             self.overlayState.recordingTriggerMode = mode
+            self.overlayState.isControlMode = isControlMode
             self.overlayState.phase = .recording
             self.overlayState.audioLevel = 0
             self.showOverlayPanel(animatedResize: true)
         }
     }
 
-    func transitionToRecording(mode: RecordingTriggerMode = .hold) {
+    func transitionToRecording(mode: RecordingTriggerMode = .hold, isControlMode: Bool = false) {
         DispatchQueue.main.async {
             self.overlayState.recordingTriggerMode = mode
+            self.overlayState.isControlMode = isControlMode
             self.overlayState.phase = .recording
             self.updateOverlayLayout(animated: true)
         }
@@ -394,6 +398,13 @@ struct RecordingOverlayView: View {
 
     var body: some View {
         HStack(spacing: 10) {
+            if state.isControlMode {
+                Text("Control")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.purple.opacity(0.9))
+                    .transition(.opacity)
+            }
+
             Group {
                 if state.phase == .initializing {
                     InitializingDotsView()
@@ -425,6 +436,7 @@ struct RecordingOverlayView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.spring(response: 0.28, dampingFraction: 0.8), value: state.phase)
         .animation(.spring(response: 0.28, dampingFraction: 0.8), value: state.recordingTriggerMode)
+        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: state.isControlMode)
     }
 }
 

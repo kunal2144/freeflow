@@ -8,13 +8,17 @@ final class HotkeyManager {
     private var eventTapRunLoopSource: CFRunLoopSource?
 
     private var configuration = ShortcutConfiguration(
-        hold: .defaultHold,
-        toggle: .defaultToggle
+        dictationHold: .defaultDictationHold,
+        dictationToggle: .defaultDictationToggle,
+        controlModeHold: .defaultControlModeHold,
+        controlModeToggle: .defaultControlModeToggle
     )
     private var pressedKeyCodes: Set<UInt16> = []
     private var pressedModifierKeyCodes: Set<UInt16> = []
-    private var holdIsActive = false
-    private var toggleIsActive = false
+    private var dictationHoldIsActive = false
+    private var dictationToggleIsActive = false
+    private var controlModeHoldIsActive = false
+    private var controlModeToggleIsActive = false
 
     var onShortcutEvent: ((ShortcutEvent) -> Void)?
 
@@ -41,8 +45,10 @@ final class HotkeyManager {
         eventTap = nil
         pressedKeyCodes.removeAll()
         pressedModifierKeyCodes.removeAll()
-        holdIsActive = false
-        toggleIsActive = false
+        dictationHoldIsActive = false
+        dictationToggleIsActive = false
+        controlModeHoldIsActive = false
+        controlModeToggleIsActive = false
     }
 
     deinit {
@@ -213,40 +219,64 @@ final class HotkeyManager {
     }
 
     private func evaluateActiveBindings() {
-        let previousHold = holdIsActive
-        let previousToggle = toggleIsActive
+        let previousDictationHold = dictationHoldIsActive
+        let previousDictationToggle = dictationToggleIsActive
+        let previousControlModeHold = controlModeHoldIsActive
+        let previousControlModeToggle = controlModeToggleIsActive
 
-        holdIsActive = bindingIsActive(configuration.hold)
-        toggleIsActive = bindingIsActive(configuration.toggle)
+        dictationHoldIsActive = bindingIsActive(configuration.dictationHold)
+        dictationToggleIsActive = bindingIsActive(configuration.dictationToggle)
+        controlModeHoldIsActive = bindingIsActive(configuration.controlModeHold)
+        controlModeToggleIsActive = bindingIsActive(configuration.controlModeToggle)
 
         emitChanges(
-            previousHold: previousHold,
-            previousToggle: previousToggle,
-            currentHold: holdIsActive,
-            currentToggle: toggleIsActive
+            previousDictationHold: previousDictationHold,
+            previousDictationToggle: previousDictationToggle,
+            previousControlModeHold: previousControlModeHold,
+            previousControlModeToggle: previousControlModeToggle,
+            currentDictationHold: dictationHoldIsActive,
+            currentDictationToggle: dictationToggleIsActive,
+            currentControlModeHold: controlModeHoldIsActive,
+            currentControlModeToggle: controlModeToggleIsActive
         )
     }
 
     private func emitChanges(
-        previousHold: Bool,
-        previousToggle: Bool,
-        currentHold: Bool,
-        currentToggle: Bool
+        previousDictationHold: Bool,
+        previousDictationToggle: Bool,
+        previousControlModeHold: Bool,
+        previousControlModeToggle: Bool,
+        currentDictationHold: Bool,
+        currentDictationToggle: Bool,
+        currentControlModeHold: Bool,
+        currentControlModeToggle: Bool
     ) {
         var activations: [(ShortcutEvent, Int)] = []
         var deactivations: [(ShortcutEvent, Int)] = []
 
-        if !previousHold && currentHold {
-            activations.append((.holdActivated, configuration.hold.specificityScore))
+        if !previousDictationHold && currentDictationHold {
+            activations.append((.dictationHoldActivated, configuration.dictationHold.specificityScore))
         }
-        if !previousToggle && currentToggle {
-            activations.append((.toggleActivated, configuration.toggle.specificityScore))
+        if !previousDictationToggle && currentDictationToggle {
+            activations.append((.dictationToggleActivated, configuration.dictationToggle.specificityScore))
         }
-        if previousHold && !currentHold {
-            deactivations.append((.holdDeactivated, configuration.hold.specificityScore))
+        if !previousControlModeHold && currentControlModeHold {
+            activations.append((.controlModeHoldActivated, configuration.controlModeHold.specificityScore))
         }
-        if previousToggle && !currentToggle {
-            deactivations.append((.toggleDeactivated, configuration.toggle.specificityScore))
+        if !previousControlModeToggle && currentControlModeToggle {
+            activations.append((.controlModeToggleActivated, configuration.controlModeToggle.specificityScore))
+        }
+        if previousDictationHold && !currentDictationHold {
+            deactivations.append((.dictationHoldDeactivated, configuration.dictationHold.specificityScore))
+        }
+        if previousDictationToggle && !currentDictationToggle {
+            deactivations.append((.dictationToggleDeactivated, configuration.dictationToggle.specificityScore))
+        }
+        if previousControlModeHold && !currentControlModeHold {
+            deactivations.append((.controlModeHoldDeactivated, configuration.controlModeHold.specificityScore))
+        }
+        if previousControlModeToggle && !currentControlModeToggle {
+            deactivations.append((.controlModeToggleDeactivated, configuration.controlModeToggle.specificityScore))
         }
 
         for (event, _) in activations.sorted(by: { $0.1 > $1.1 }) {
@@ -331,20 +361,29 @@ final class HotkeyManager {
     }
 
     private func relevantBindings(for keyCode: UInt16, kind: ShortcutBindingKind) -> [ShortcutBinding] {
-        [configuration.hold, configuration.toggle].filter { binding in
+        [configuration.dictationHold, configuration.dictationToggle, configuration.controlModeHold, configuration.controlModeToggle].filter { binding in
             binding.kind == kind && binding.keyCode == keyCode
         }
     }
 
     private func shortcutReferencesKeyCode(_ keyCode: UInt16) -> Bool {
-        configuration.hold.kind == .key && configuration.hold.keyCode == keyCode
-            || configuration.toggle.kind == .key && configuration.toggle.keyCode == keyCode
+        configuration.dictationHold.kind == .key && configuration.dictationHold.keyCode == keyCode
+            || configuration.dictationToggle.kind == .key && configuration.dictationToggle.keyCode == keyCode
+            || configuration.controlModeHold.kind == .key && configuration.controlModeHold.keyCode == keyCode
+            || configuration.controlModeToggle.kind == .key && configuration.controlModeToggle.keyCode == keyCode
     }
 
     private func shortcutReferencesModifierKeyCode(_ keyCode: UInt16) -> Bool {
-        configuration.hold.kind == .modifierKey && configuration.hold.keyCode == keyCode
-            || configuration.toggle.kind == .modifierKey && configuration.toggle.keyCode == keyCode
-            || modifierFlagsForKeyCode(keyCode).map { configuration.hold.modifiers.contains($0) || configuration.toggle.modifiers.contains($0) } == true
+        configuration.dictationHold.kind == .modifierKey && configuration.dictationHold.keyCode == keyCode
+            || configuration.dictationToggle.kind == .modifierKey && configuration.dictationToggle.keyCode == keyCode
+            || configuration.controlModeHold.kind == .modifierKey && configuration.controlModeHold.keyCode == keyCode
+            || configuration.controlModeToggle.kind == .modifierKey && configuration.controlModeToggle.keyCode == keyCode
+            || modifierFlagsForKeyCode(keyCode).map {
+                configuration.dictationHold.modifiers.contains($0)
+                    || configuration.dictationToggle.modifiers.contains($0)
+                    || configuration.controlModeHold.modifiers.contains($0)
+                    || configuration.controlModeToggle.modifiers.contains($0)
+            } == true
     }
 
     private func modifierFlagsForKeyCode(_ keyCode: UInt16) -> ShortcutModifiers? {

@@ -20,7 +20,7 @@ struct PipelineDebugPanelView: View {
             )
 
             if appState.lastContextSummary.isEmpty && appState.lastRawTranscript.isEmpty {
-                Text("Run a dictation pass to populate debug output.")
+                Text("Run a Dictation Mode pass to populate debug output.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

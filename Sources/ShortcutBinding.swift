@@ -57,33 +57,48 @@ enum RecordingTriggerMode: String, Codable {
     var badgeTitle: String {
         switch self {
         case .hold: return "Hold"
-        case .toggle: return "Tap"
+        case .toggle: return "Toggle"
         }
     }
 }
 
+enum RecordingMode {
+    case dictation
+    case controlMode
+}
+
 enum ShortcutRole {
-    case hold
-    case toggle
+    case dictationHold
+    case dictationToggle
+    case controlModeHold
+    case controlModeToggle
 
     var title: String {
         switch self {
-        case .hold: return "Hold to Talk"
-        case .toggle: return "Tap to Toggle"
+        case .dictationHold: return "Hold Shortcut"
+        case .dictationToggle: return "Toggle Shortcut"
+        case .controlModeHold: return "Hold Shortcut"
+        case .controlModeToggle: return "Toggle Shortcut"
         }
     }
 }
 
 enum ShortcutEvent {
-    case holdActivated
-    case holdDeactivated
-    case toggleActivated
-    case toggleDeactivated
+    case dictationHoldActivated
+    case dictationHoldDeactivated
+    case dictationToggleActivated
+    case dictationToggleDeactivated
+    case controlModeHoldActivated
+    case controlModeHoldDeactivated
+    case controlModeToggleActivated
+    case controlModeToggleDeactivated
 }
 
 struct ShortcutConfiguration {
-    let hold: ShortcutBinding
-    let toggle: ShortcutBinding
+    let dictationHold: ShortcutBinding
+    let dictationToggle: ShortcutBinding
+    let controlModeHold: ShortcutBinding
+    let controlModeToggle: ShortcutBinding
 }
 
 enum ShortcutPreset: String, CaseIterable, Identifiable, Codable {
@@ -152,6 +167,11 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
         preset?.title ?? displayName
     }
 
+    func isSameKeyCombo(as other: ShortcutBinding) -> Bool {
+        guard !isDisabled, !other.isDisabled else { return false }
+        return keyCode == other.keyCode && modifiers == other.modifiers && kind == other.kind
+    }
+
     var isCustom: Bool {
         preset == nil && !isDisabled
     }
@@ -187,8 +207,10 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
         kind: .disabled,
         preset: nil
     )
-    static let defaultHold = ShortcutPreset.fnKey.binding
-    static let defaultToggle = ShortcutPreset.fnKey.binding.withAddedModifiers(.command)
+    static let defaultDictationHold = ShortcutPreset.fnKey.binding
+    static let defaultDictationToggle = ShortcutPreset.fnKey.binding.withAddedModifiers(.command)
+    static let defaultControlModeHold = ShortcutPreset.rightOption.binding
+    static let defaultControlModeToggle = ShortcutBinding.disabled
 
     static func from(event: NSEvent) -> ShortcutBinding? {
         guard !event.isARepeat else { return nil }
