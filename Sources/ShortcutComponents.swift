@@ -1,6 +1,60 @@
 import SwiftUI
 import AppKit
 
+struct ControlModeShortcutEditor: View {
+    @EnvironmentObject var appState: AppState
+
+    let onCaptureStateChange: ((Bool) -> Void)?
+
+    @State private var activeCaptureRole: ShortcutRole?
+    @State private var holdValidationMessage: String?
+    @State private var toggleValidationMessage: String?
+
+    init(onCaptureStateChange: ((Bool) -> Void)? = nil) {
+        self.onCaptureStateChange = onCaptureStateChange
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Activate Control Mode to speak an instruction — it will be applied to selected text (if any) or executed directly. Hold to record and release to process, or tap to toggle recording on/off.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ShortcutRoleSection(
+                role: .controlModeHold,
+                selection: appState.controlModeHoldShortcut,
+                validationMessage: holdValidationMessage,
+                isCapturing: Binding(
+                    get: { activeCaptureRole == .controlModeHold },
+                    set: { activeCaptureRole = $0 ? .controlModeHold : nil }
+                ),
+                onSelect: { binding in
+                    holdValidationMessage = appState.setShortcut(binding, for: .controlModeHold)
+                }
+            )
+
+            ShortcutRoleSection(
+                role: .controlModeToggle,
+                selection: appState.controlModeToggleShortcut,
+                validationMessage: toggleValidationMessage,
+                isCapturing: Binding(
+                    get: { activeCaptureRole == .controlModeToggle },
+                    set: { activeCaptureRole = $0 ? .controlModeToggle : nil }
+                ),
+                onSelect: { binding in
+                    toggleValidationMessage = appState.setShortcut(binding, for: .controlModeToggle)
+                }
+            )
+        }
+        .onChange(of: activeCaptureRole) { role in
+            onCaptureStateChange?(role != nil)
+        }
+        .onDisappear {
+            onCaptureStateChange?(false)
+        }
+    }
+}
+
 struct DictationShortcutEditor: View {
     @EnvironmentObject var appState: AppState
 
@@ -25,28 +79,28 @@ struct DictationShortcutEditor: View {
             }
 
             ShortcutRoleSection(
-                role: .hold,
-                selection: appState.holdShortcut,
+                role: .dictationHold,
+                selection: appState.dictationHoldShortcut,
                 validationMessage: holdValidationMessage,
                 isCapturing: Binding(
-                    get: { activeCaptureRole == .hold },
-                    set: { activeCaptureRole = $0 ? .hold : nil }
+                    get: { activeCaptureRole == .dictationHold },
+                    set: { activeCaptureRole = $0 ? .dictationHold : nil }
                 ),
                 onSelect: { binding in
-                    holdValidationMessage = appState.setShortcut(binding, for: .hold)
+                    holdValidationMessage = appState.setShortcut(binding, for: .dictationHold)
                 }
             )
 
             ShortcutRoleSection(
-                role: .toggle,
-                selection: appState.toggleShortcut,
+                role: .dictationToggle,
+                selection: appState.dictationToggleShortcut,
                 validationMessage: toggleValidationMessage,
                 isCapturing: Binding(
-                    get: { activeCaptureRole == .toggle },
-                    set: { activeCaptureRole = $0 ? .toggle : nil }
+                    get: { activeCaptureRole == .dictationToggle },
+                    set: { activeCaptureRole = $0 ? .dictationToggle : nil }
                 ),
                 onSelect: { binding in
-                    toggleValidationMessage = appState.setShortcut(binding, for: .toggle)
+                    toggleValidationMessage = appState.setShortcut(binding, for: .dictationToggle)
                 }
             )
 

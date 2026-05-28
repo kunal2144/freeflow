@@ -14,15 +14,17 @@ final class DictationShortcutSessionController {
         if activeMode == nil {
             guard !isTranscribing else { return nil }
             switch event {
-            case .toggleActivated:
+            case .dictationToggleActivated:
                 activeMode = .toggle
                 toggleStopArmed = false
                 return .start(.toggle)
-            case .holdActivated:
+            case .dictationHoldActivated:
                 activeMode = .hold
                 toggleStopArmed = false
                 return .start(.hold)
-            case .holdDeactivated, .toggleDeactivated:
+            case .dictationHoldDeactivated, .dictationToggleDeactivated:
+                return nil
+            default:
                 return nil
             }
         }
@@ -30,27 +32,31 @@ final class DictationShortcutSessionController {
         switch activeMode {
         case .hold:
             switch event {
-            case .toggleActivated:
+            case .dictationToggleActivated:
                 activeMode = .toggle
                 toggleStopArmed = false
                 return .switchedToToggle
-            case .holdDeactivated:
+            case .dictationHoldDeactivated:
                 reset()
                 return .stop
-            case .holdActivated, .toggleDeactivated:
+            case .dictationHoldActivated, .dictationToggleDeactivated:
+                return nil
+            default:
                 return nil
             }
 
         case .toggle:
             switch event {
-            case .toggleDeactivated:
+            case .dictationToggleDeactivated:
                 toggleStopArmed = true
                 return nil
-            case .toggleActivated:
+            case .dictationToggleActivated:
                 guard toggleStopArmed else { return nil }
                 reset()
                 return .stop
-            case .holdActivated, .holdDeactivated:
+            case .dictationHoldActivated, .dictationHoldDeactivated:
+                return nil
+            default:
                 return nil
             }
 

@@ -1,0 +1,4 @@
+1. Variable Name Inconsistencies for Dictation Mode in ShortcutEvent
+2. Control Mode - Improve Prompt to skip invalid inputs and avoid bad outputs
+3. Confirm if loading is there for both Control and Dictation Mode
+4. Control Mode doesn't have stop button for toggle mode like Dictation Mode.

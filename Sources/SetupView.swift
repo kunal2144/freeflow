@@ -202,7 +202,7 @@ struct SetupView: View {
                 Text("Welcome to FreeFlow")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
 
-                Text("Dictate text anywhere on your Mac.\nHold to talk or tap to toggle dictation.")
+                Text("Dictate text anywhere on your Mac.\nHold to talk or tap to toggle Dictation Mode.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -521,17 +521,17 @@ struct SetupView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             ShortcutRoleSection(
-                role: .hold,
-                selection: appState.holdShortcut,
+                role: .dictationHold,
+                selection: appState.dictationHoldShortcut,
                 validationMessage: holdShortcutValidationMessage,
                 isCapturing: $isCapturingHoldShortcut,
                 onSelect: { binding in
-                    holdShortcutValidationMessage = appState.setShortcut(binding, for: .hold)
+                    holdShortcutValidationMessage = appState.setShortcut(binding, for: .dictationHold)
                 }
             )
                 .padding(.top, 10)
 
-            if appState.holdShortcut.usesFnKey {
+            if appState.dictationHoldShortcut.usesFnKey {
                 Text("Tip: If Fn opens Emoji picker, go to System Settings > Keyboard and change \"Press fn key to\" to \"Do Nothing\".")
                     .font(.caption)
                     .foregroundStyle(.orange)
@@ -557,17 +557,17 @@ struct SetupView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             ShortcutRoleSection(
-                role: .toggle,
-                selection: appState.toggleShortcut,
+                role: .dictationToggle,
+                selection: appState.dictationToggleShortcut,
                 validationMessage: toggleShortcutValidationMessage,
                 isCapturing: $isCapturingToggleShortcut,
                 onSelect: { binding in
-                    toggleShortcutValidationMessage = appState.setShortcut(binding, for: .toggle)
+                    toggleShortcutValidationMessage = appState.setShortcut(binding, for: .dictationToggle)
                 }
             )
                 .padding(.top, 10)
 
-            if appState.toggleShortcut.usesFnKey {
+            if appState.dictationToggleShortcut.usesFnKey {
                 Text("Tip: If Fn opens Emoji picker, go to System Settings > Keyboard and change \"Press fn key to\" to \"Do Nothing\".")
                     .font(.caption)
                     .foregroundStyle(.orange)
@@ -794,13 +794,13 @@ struct SetupView: View {
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 12) {
-                if appState.hasEnabledHoldShortcut {
-                    HowToRow(icon: "keyboard", text: "Hold \(appState.holdShortcut.displayName) to record")
+                if appState.hasEnabledDictationHoldShortcut {
+                    HowToRow(icon: "keyboard", text: "Hold \(appState.dictationHoldShortcut.displayName) to record")
                 }
-                if appState.hasEnabledToggleShortcut {
-                    HowToRow(icon: "switch.2", text: "Tap \(appState.toggleShortcut.displayName) to start and stop")
+                if appState.hasEnabledDictationToggleShortcut {
+                    HowToRow(icon: "switch.2", text: "Toggle \(appState.dictationToggleShortcut.displayName) to start and stop")
                 }
-                if appState.hasEnabledHoldShortcut && appState.hasEnabledToggleShortcut {
+                if appState.hasEnabledDictationHoldShortcut && appState.hasEnabledDictationToggleShortcut {
                     HowToRow(icon: "arrow.triangle.branch", text: "While holding, press the toggle shortcut to latch on")
                 }
                 HowToRow(icon: "doc.on.clipboard", text: "Text is typed at your cursor & copied")
@@ -836,15 +836,15 @@ struct SetupView: View {
     }
 
     private var testShortcutPrompt: String {
-        switch (appState.hasEnabledHoldShortcut, appState.hasEnabledToggleShortcut) {
+        switch (appState.hasEnabledDictationHoldShortcut, appState.hasEnabledDictationToggleShortcut) {
         case (true, true):
-            return "Hold \(appState.holdShortcut.displayName) or tap \(appState.toggleShortcut.displayName)"
+            return "Hold \(appState.dictationHoldShortcut.displayName) or toggle \(appState.dictationToggleShortcut.displayName)"
         case (true, false):
-            return "Hold \(appState.holdShortcut.displayName)"
+            return "Hold \(appState.dictationHoldShortcut.displayName)"
         case (false, true):
-            return "Tap \(appState.toggleShortcut.displayName)"
+            return "Toggle \(appState.dictationToggleShortcut.displayName)"
         case (false, false):
-            return "Use Start Dictating from the menu bar"
+            return "Use Start Dictation Mode from the menu bar"
         }
     }
 
@@ -1034,8 +1034,10 @@ struct SetupView: View {
         }
 
         testHotkeyHarness.start(configuration: ShortcutConfiguration(
-            hold: appState.holdShortcut,
-            toggle: appState.toggleShortcut
+            dictationHold: appState.dictationHoldShortcut,
+            dictationToggle: appState.dictationToggleShortcut,
+            controlModeHold: appState.controlModeHoldShortcut,
+            controlModeToggle: appState.controlModeToggleShortcut
         ), startDelay: appState.shortcutStartDelay)
     }
 

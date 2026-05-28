@@ -234,8 +234,11 @@ struct GeneralSettingsView: View {
                 SettingsCard("API Key", icon: "key.fill") {
                     apiKeySection
                 }
-                SettingsCard("Dictation Shortcuts", icon: "keyboard.fill") {
-                    hotkeySection
+                SettingsCard("Dictation Mode Shortcuts", icon: "keyboard.fill") {
+                    dictationModeShortcutsSection
+                }
+                SettingsCard("Control Mode Shortcuts", icon: "wand.and.stars") {
+                    controlModeShortcutsSection
                 }
                 SettingsCard("Clipboard", icon: "doc.on.clipboard") {
                     clipboardSection
@@ -506,9 +509,9 @@ struct GeneralSettingsView: View {
         }
     }
 
-    // MARK: Dictation Shortcuts
+    // MARK: Dictation Mode Shortcuts
 
-    private var hotkeySection: some View {
+    private var dictationModeShortcutsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             DictationShortcutEditor { isCapturing in
                 if isCapturing {
@@ -539,6 +542,18 @@ struct GeneralSettingsView: View {
                 Text("Applies before recording starts for both hold and tap shortcuts. Stopping still happens immediately.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: Control Mode Shortcuts
+
+    private var controlModeShortcutsSection: some View {
+        ControlModeShortcutEditor { isCapturing in
+            if isCapturing {
+                appState.suspendHotkeyMonitoringForShortcutCapture()
+            } else {
+                appState.resumeHotkeyMonitoringAfterShortcutCapture()
             }
         }
     }
@@ -1225,7 +1240,7 @@ struct RunLogView: View {
             if appState.pipelineHistory.isEmpty {
                 VStack {
                     Spacer()
-                    Text("No runs yet. Use dictation to populate history.")
+                    Text("No runs yet. Use Dictation Mode to populate history.")
                         .foregroundStyle(.secondary)
                     Spacer()
                 }

@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(make build:*)",
+      "Bash(make)",
+      "Bash(xcodebuild -scheme FreeFlow -destination 'platform=macOS' build)",
+      "Bash(ls /Users/kunal.j/Dev/personal/freeflow/*.xcodeproj /Users/kunal.j/Dev/personal/freeflow/*.xcworkspace /Users/kunal.j/Dev/personal/freeflow/Package.swift)",
+      "Bash(swiftc -parse-as-library -typecheck -sdk /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -target arm64-apple-macosx13.0 '/Users/kunal.j/Dev/personal/freeflow/Sources/*.swift')",
+      "Bash(swiftc:*)",
+      "Bash(swift build:*)",
+      "Bash(make clean:*)",
+      "Bash(make run:*)",
+      "Bash(killall \"FreeFlow Dev\")"
+    ]
+  }
+}

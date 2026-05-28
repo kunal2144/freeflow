@@ -8,6 +8,51 @@ struct MenuBarView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     }
 
+    @ViewBuilder
+    private func shortcutOptions(
+        for role: ShortcutRole,
+        current: ShortcutBinding,
+        disableWhen: @escaping (ShortcutPreset) -> Bool,
+        disableDisabled: Bool
+    ) -> some View {
+        Button {
+            _ = appState.setShortcut(.disabled, for: role)
+        } label: {
+            if current.isDisabled {
+                Text("✓ Disabled")
+            } else {
+                Text("  Disabled")
+            }
+        }
+        .disabled(disableDisabled)
+
+        ForEach(ShortcutPreset.allCases) { preset in
+            Button {
+                _ = appState.setShortcut(preset.binding, for: role)
+            } label: {
+                if current == preset.binding {
+                    Text("✓ \(preset.title)")
+                } else {
+                    Text("  \(preset.title)")
+                }
+            }
+            .disabled(disableWhen(preset))
+        }
+
+        if let savedCustomShortcut = appState.savedCustomShortcut(for: role) {
+            Divider()
+            Button {
+                _ = appState.setShortcut(savedCustomShortcut, for: role)
+            } label: {
+                if current == savedCustomShortcut {
+                    Text("✓ Custom: \(savedCustomShortcut.displayName)")
+                } else {
+                    Text("  Custom: \(savedCustomShortcut.displayName)")
+                }
+            }
+        }
+    }
+
     var body: some View {
         VStack(spacing: 4) {
             Text("FreeFlow v\(appVersion)")
@@ -75,7 +120,7 @@ struct MenuBarView: View {
             Divider()
 
             // Manual toggle
-            Button(appState.isRecording ? "Stop Recording" : "Start Dictating") {
+            Button(appState.isRecording ? "Stop Recording" : "Start Dictation Mode") {
                 appState.toggleRecording()
             }
             .disabled(appState.isTranscribing)
@@ -108,42 +153,31 @@ struct MenuBarView: View {
 
             Divider()
 
-            Menu("Hold Shortcut") {
-                Button {
-                    _ = appState.setShortcut(.disabled, for: .hold)
-                } label: {
-                    if appState.holdShortcut.isDisabled {
-                        Text("✓ Disabled")
-                    } else {
-                        Text("  Disabled")
-                    }
-                }
-                .disabled(appState.toggleShortcut.isDisabled)
-
-                ForEach(ShortcutPreset.allCases) { preset in
-                    Button {
-                        _ = appState.setShortcut(preset.binding, for: .hold)
-                    } label: {
-                        if appState.holdShortcut == preset.binding {
-                            Text("✓ \(preset.title)")
-                        } else {
-                            Text("  \(preset.title)")
-                        }
-                    }
-                    .disabled(preset.binding == appState.toggleShortcut)
+            Menu("Dictation Mode Shortcuts") {
+                Menu("Hold Shortcut — \(appState.dictationHoldShortcut.displayName)") {
+                    shortcutOptions(
+                        for: .dictationHold,
+                        current: appState.dictationHoldShortcut,
+                        disableWhen: { preset in
+                            preset.binding == appState.dictationToggleShortcut
+                            || preset.binding == appState.controlModeHoldShortcut
+                            || preset.binding == appState.controlModeToggleShortcut
+                        },
+                        disableDisabled: appState.dictationToggleShortcut.isDisabled
+                    )
                 }
 
-                if let savedCustomShortcut = appState.savedCustomShortcut(for: .hold) {
-                    Divider()
-                    Button {
-                        _ = appState.setShortcut(savedCustomShortcut, for: .hold)
-                    } label: {
-                        if appState.holdShortcut == savedCustomShortcut {
-                            Text("✓ Custom: \(savedCustomShortcut.displayName)")
-                        } else {
-                            Text("  Custom: \(savedCustomShortcut.displayName)")
-                        }
-                    }
+                Menu("Toggle Shortcut — \(appState.dictationToggleShortcut.displayName)") {
+                    shortcutOptions(
+                        for: .dictationToggle,
+                        current: appState.dictationToggleShortcut,
+                        disableWhen: { preset in
+                            preset.binding == appState.dictationHoldShortcut
+                            || preset.binding == appState.controlModeHoldShortcut
+                            || preset.binding == appState.controlModeToggleShortcut
+                        },
+                        disableDisabled: appState.dictationHoldShortcut.isDisabled
+                    )
                 }
 
                 Divider()
@@ -153,42 +187,31 @@ struct MenuBarView: View {
                 }
             }
 
-            Menu("Toggle Shortcut") {
-                Button {
-                    _ = appState.setShortcut(.disabled, for: .toggle)
-                } label: {
-                    if appState.toggleShortcut.isDisabled {
-                        Text("✓ Disabled")
-                    } else {
-                        Text("  Disabled")
-                    }
-                }
-                .disabled(appState.holdShortcut.isDisabled)
-
-                ForEach(ShortcutPreset.allCases) { preset in
-                    Button {
-                        _ = appState.setShortcut(preset.binding, for: .toggle)
-                    } label: {
-                        if appState.toggleShortcut == preset.binding {
-                            Text("✓ \(preset.title)")
-                        } else {
-                            Text("  \(preset.title)")
-                        }
-                    }
-                    .disabled(preset.binding == appState.holdShortcut)
+            Menu("Control Mode Shortcuts") {
+                Menu("Hold Shortcut — \(appState.controlModeHoldShortcut.displayName)") {
+                    shortcutOptions(
+                        for: .controlModeHold,
+                        current: appState.controlModeHoldShortcut,
+                        disableWhen: { preset in
+                            preset.binding == appState.dictationHoldShortcut
+                            || preset.binding == appState.dictationToggleShortcut
+                            || preset.binding == appState.controlModeToggleShortcut
+                        },
+                        disableDisabled: false
+                    )
                 }
 
-                if let savedCustomShortcut = appState.savedCustomShortcut(for: .toggle) {
-                    Divider()
-                    Button {
-                        _ = appState.setShortcut(savedCustomShortcut, for: .toggle)
-                    } label: {
-                        if appState.toggleShortcut == savedCustomShortcut {
-                            Text("✓ Custom: \(savedCustomShortcut.displayName)")
-                        } else {
-                            Text("  Custom: \(savedCustomShortcut.displayName)")
-                        }
-                    }
+                Menu("Toggle Shortcut — \(appState.controlModeToggleShortcut.displayName)") {
+                    shortcutOptions(
+                        for: .controlModeToggle,
+                        current: appState.controlModeToggleShortcut,
+                        disableWhen: { preset in
+                            preset.binding == appState.dictationHoldShortcut
+                            || preset.binding == appState.dictationToggleShortcut
+                            || preset.binding == appState.controlModeHoldShortcut
+                        },
+                        disableDisabled: false
+                    )
                 }
 
                 Divider()

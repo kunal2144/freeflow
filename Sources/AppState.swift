@@ -114,10 +114,10 @@ private struct PendingClipboardRestore {
 final class AppState: ObservableObject, @unchecked Sendable {
     private let apiKeyStorageKey = "groq_api_key"
     private let apiBaseURLStorageKey = "api_base_url"
-    private let holdShortcutStorageKey = "hold_shortcut"
-    private let toggleShortcutStorageKey = "toggle_shortcut"
-    private let savedHoldCustomShortcutStorageKey = "saved_hold_custom_shortcut"
-    private let savedToggleCustomShortcutStorageKey = "saved_toggle_custom_shortcut"
+    private let dictationHoldShortcutStorageKey = "hold_shortcut"
+    private let dictationToggleShortcutStorageKey = "toggle_shortcut"
+    private let savedDictationHoldCustomShortcutStorageKey = "saved_hold_custom_shortcut"
+    private let savedDictationToggleCustomShortcutStorageKey = "saved_toggle_custom_shortcut"
     private let customVocabularyStorageKey = "custom_vocabulary"
     private let selectedMicrophoneStorageKey = "selected_microphone_id"
     private let customSystemPromptStorageKey = "custom_system_prompt"
@@ -129,6 +129,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let forceHTTP2TranscriptionStorageKey = "force_http2_transcription"
     private let soundVolumeStorageKey = "sound_volume"
     private let voiceMacrosStorageKey = "voice_macros"
+    private let controlModeHoldShortcutStorageKey = "control_mode_shortcut"
+    private let savedControlModeHoldCustomShortcutStorageKey = "saved_control_mode_custom_shortcut"
+    private let controlModeToggleShortcutStorageKey = "control_mode_toggle_shortcut"
+    private let savedControlModeToggleCustomShortcutStorageKey = "saved_control_mode_toggle_custom_shortcut"
     private let transcribingIndicatorDelay: TimeInterval = 1.0
     private let clipboardRestoreDelay: TimeInterval = 0.15
     let maxPipelineHistoryCount = 20
@@ -143,6 +147,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         didSet {
             persistAPIKey(apiKey)
             contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+            controlModeService = ControlModeService(apiKey: apiKey, baseURL: apiBaseURL)
         }
     }
 
@@ -150,32 +155,59 @@ final class AppState: ObservableObject, @unchecked Sendable {
         didSet {
             persistAPIBaseURL(apiBaseURL)
             contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+            controlModeService = ControlModeService(apiKey: apiKey, baseURL: apiBaseURL)
         }
     }
 
-    @Published var holdShortcut: ShortcutBinding {
+    @Published var dictationHoldShortcut: ShortcutBinding {
         didSet {
-            persistShortcut(holdShortcut, key: holdShortcutStorageKey)
+            persistShortcut(dictationHoldShortcut, key: dictationHoldShortcutStorageKey)
             restartHotkeyMonitoring()
         }
     }
 
-    @Published var toggleShortcut: ShortcutBinding {
+    @Published var dictationToggleShortcut: ShortcutBinding {
         didSet {
-            persistShortcut(toggleShortcut, key: toggleShortcutStorageKey)
+            persistShortcut(dictationToggleShortcut, key: dictationToggleShortcutStorageKey)
             restartHotkeyMonitoring()
         }
     }
 
-    @Published private(set) var savedHoldCustomShortcut: ShortcutBinding? {
+    @Published var controlModeHoldShortcut: ShortcutBinding {
         didSet {
-            persistOptionalShortcut(savedHoldCustomShortcut, key: savedHoldCustomShortcutStorageKey)
+            persistShortcut(controlModeHoldShortcut, key: controlModeHoldShortcutStorageKey)
+            restartHotkeyMonitoring()
         }
     }
 
-    @Published private(set) var savedToggleCustomShortcut: ShortcutBinding? {
+    @Published var controlModeToggleShortcut: ShortcutBinding {
         didSet {
-            persistOptionalShortcut(savedToggleCustomShortcut, key: savedToggleCustomShortcutStorageKey)
+            persistShortcut(controlModeToggleShortcut, key: controlModeToggleShortcutStorageKey)
+            restartHotkeyMonitoring()
+        }
+    }
+
+    @Published private(set) var savedControlModeHoldCustomShortcut: ShortcutBinding? {
+        didSet {
+            persistOptionalShortcut(savedControlModeHoldCustomShortcut, key: savedControlModeHoldCustomShortcutStorageKey)
+        }
+    }
+
+    @Published private(set) var savedControlModeToggleCustomShortcut: ShortcutBinding? {
+        didSet {
+            persistOptionalShortcut(savedControlModeToggleCustomShortcut, key: savedControlModeToggleCustomShortcutStorageKey)
+        }
+    }
+
+    @Published private(set) var savedDictationHoldCustomShortcut: ShortcutBinding? {
+        didSet {
+            persistOptionalShortcut(savedDictationHoldCustomShortcut, key: savedDictationHoldCustomShortcutStorageKey)
+        }
+    }
+
+    @Published private(set) var savedDictationToggleCustomShortcut: ShortcutBinding? {
+        didSet {
+            persistOptionalShortcut(savedDictationToggleCustomShortcut, key: savedDictationToggleCustomShortcutStorageKey)
         }
     }
 
@@ -246,6 +278,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     @Published var isRecording = false
+    @Published private(set) var activeRecordingMode: RecordingMode?
     @Published var isTranscribing = false
     @Published var retryingItemIDs: Set<UUID> = []
     @Published var lastTranscript: String = ""
@@ -283,6 +316,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var debugOverlayTimer: Timer?
     private var transcribingIndicatorTask: Task<Void, Never>?
     private var contextService: AppContextService
+    private var controlModeService: ControlModeService
     private var contextCaptureTask: Task<AppContext?, Never>?
     private var capturedContext: AppContext?
     private var hasShownScreenshotPermissionAlert = false
@@ -292,6 +326,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var activeRecordingTriggerMode: RecordingTriggerMode?
     private var pendingShortcutStartTask: Task<Void, Never>?
     private var pendingShortcutStartMode: RecordingTriggerMode?
+    private var controlModeToggleArmed = false
     private var shouldMonitorHotkeys = false
     private var isCapturingShortcut = false
 
@@ -300,12 +335,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let apiKey = Self.loadStoredAPIKey(account: apiKeyStorageKey)
         let apiBaseURL = Self.loadStoredAPIBaseURL(account: "api_base_url")
         let shortcuts = Self.loadShortcutConfiguration(
-            holdKey: holdShortcutStorageKey,
-            toggleKey: toggleShortcutStorageKey
+            holdKey: dictationHoldShortcutStorageKey,
+            toggleKey: dictationToggleShortcutStorageKey
         )
-        let savedHoldCustomShortcut = Self.loadShortcut(forKey: savedHoldCustomShortcutStorageKey)
+        let savedDictationHoldCustomShortcut = Self.loadShortcut(forKey: savedDictationHoldCustomShortcutStorageKey)
             ?? (shortcuts.hold.isCustom ? shortcuts.hold : nil)
-        let savedToggleCustomShortcut = Self.loadShortcut(forKey: savedToggleCustomShortcutStorageKey)
+        let savedDictationToggleCustomShortcut = Self.loadShortcut(forKey: savedDictationToggleCustomShortcutStorageKey)
             ?? (shortcuts.toggle.isCustom ? shortcuts.toggle : nil)
         let customVocabulary = UserDefaults.standard.string(forKey: customVocabularyStorageKey) ?? ""
         let customSystemPrompt = UserDefaults.standard.string(forKey: customSystemPromptStorageKey) ?? ""
@@ -343,14 +378,26 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let selectedMicrophoneID = UserDefaults.standard.string(forKey: selectedMicrophoneStorageKey) ?? "default"
 
+        let controlModeHoldShortcut = Self.loadShortcut(forKey: controlModeHoldShortcutStorageKey) ?? .defaultControlModeHold
+        let savedControlModeHoldCustomShortcut = Self.loadShortcut(forKey: savedControlModeHoldCustomShortcutStorageKey)
+            ?? (controlModeHoldShortcut.isCustom ? controlModeHoldShortcut : nil)
+        let controlModeToggleShortcut = Self.loadShortcut(forKey: controlModeToggleShortcutStorageKey) ?? .defaultControlModeToggle
+        let savedControlModeToggleCustomShortcut = Self.loadShortcut(forKey: savedControlModeToggleCustomShortcutStorageKey)
+            ?? (controlModeToggleShortcut.isCustom ? controlModeToggleShortcut : nil)
+
         self.contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+        self.controlModeService = ControlModeService(apiKey: apiKey, baseURL: apiBaseURL)
         self.hasCompletedSetup = hasCompletedSetup
         self.apiKey = apiKey
         self.apiBaseURL = apiBaseURL
-        self.holdShortcut = shortcuts.hold
-        self.toggleShortcut = shortcuts.toggle
-        self.savedHoldCustomShortcut = savedHoldCustomShortcut
-        self.savedToggleCustomShortcut = savedToggleCustomShortcut
+        self.dictationHoldShortcut = shortcuts.hold
+        self.dictationToggleShortcut = shortcuts.toggle
+        self.controlModeHoldShortcut = controlModeHoldShortcut
+        self.savedControlModeHoldCustomShortcut = savedControlModeHoldCustomShortcut
+        self.controlModeToggleShortcut = controlModeToggleShortcut
+        self.savedControlModeToggleCustomShortcut = savedControlModeToggleCustomShortcut
+        self.savedDictationHoldCustomShortcut = savedDictationHoldCustomShortcut
+        self.savedDictationToggleCustomShortcut = savedDictationToggleCustomShortcut
         self.customVocabulary = customVocabulary
         self.customSystemPrompt = customSystemPrompt
         self.customContextPrompt = customContextPrompt
@@ -372,11 +419,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         installAudioDeviceListener()
 
         if shortcuts.didMigrateLegacyValue {
-            persistShortcut(shortcuts.hold, key: holdShortcutStorageKey)
-            persistShortcut(shortcuts.toggle, key: toggleShortcutStorageKey)
+            persistShortcut(shortcuts.hold, key: dictationHoldShortcutStorageKey)
+            persistShortcut(shortcuts.toggle, key: dictationToggleShortcutStorageKey)
         }
-        persistOptionalShortcut(savedHoldCustomShortcut, key: savedHoldCustomShortcutStorageKey)
-        persistOptionalShortcut(savedToggleCustomShortcut, key: savedToggleCustomShortcutStorageKey)
+        persistOptionalShortcut(savedDictationHoldCustomShortcut, key: savedDictationHoldCustomShortcutStorageKey)
+        persistOptionalShortcut(savedDictationToggleCustomShortcut, key: savedDictationToggleCustomShortcutStorageKey)
 
         overlayManager.onStopButtonPressed = { [weak self] in
             DispatchQueue.main.async {
@@ -736,25 +783,25 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     var usesFnShortcut: Bool {
-        holdShortcut.usesFnKey || toggleShortcut.usesFnKey
+        dictationHoldShortcut.usesFnKey || dictationToggleShortcut.usesFnKey
     }
 
-    var hasEnabledHoldShortcut: Bool {
-        !holdShortcut.isDisabled
+    var hasEnabledDictationHoldShortcut: Bool {
+        !dictationHoldShortcut.isDisabled
     }
 
-    var hasEnabledToggleShortcut: Bool {
-        !toggleShortcut.isDisabled
+    var hasEnabledDictationToggleShortcut: Bool {
+        !dictationToggleShortcut.isDisabled
     }
 
     var shortcutStatusText: String {
-        switch (hasEnabledHoldShortcut, hasEnabledToggleShortcut) {
+        switch (hasEnabledDictationHoldShortcut, hasEnabledDictationToggleShortcut) {
         case (true, true):
-            return "Hold \(holdShortcut.displayName) or tap \(toggleShortcut.displayName) to dictate"
+            return "Hold \(dictationHoldShortcut.displayName) or toggle \(dictationToggleShortcut.displayName) to dictate"
         case (true, false):
-            return "Hold \(holdShortcut.displayName) to dictate"
+            return "Hold \(dictationHoldShortcut.displayName) to dictate"
         case (false, true):
-            return "Tap \(toggleShortcut.displayName) to dictate"
+            return "Toggle \(dictationToggleShortcut.displayName) to dictate"
         case (false, false):
             return "No dictation shortcut enabled"
         }
@@ -766,34 +813,79 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     func savedCustomShortcut(for role: ShortcutRole) -> ShortcutBinding? {
         switch role {
-        case .hold:
-            return savedHoldCustomShortcut
-        case .toggle:
-            return savedToggleCustomShortcut
+        case .dictationHold:
+            return savedDictationHoldCustomShortcut
+        case .dictationToggle:
+            return savedDictationToggleCustomShortcut
+        case .controlModeHold:
+            return savedControlModeHoldCustomShortcut
+        case .controlModeToggle:
+            return savedControlModeToggleCustomShortcut
         }
     }
 
     @discardableResult
     func setShortcut(_ binding: ShortcutBinding, for role: ShortcutRole) -> String? {
-        let otherBinding = role == .hold ? toggleShortcut : holdShortcut
-        if binding.isDisabled && otherBinding.isDisabled {
-            return "At least one shortcut must remain enabled."
-        }
-        guard binding != otherBinding else {
-            return "Hold and tap shortcuts must be different."
-        }
-
         switch role {
-        case .hold:
-            if binding.isCustom {
-                savedHoldCustomShortcut = binding
+        case .dictationHold:
+            let otherDictation = dictationToggleShortcut
+            if binding.isDisabled && otherDictation.isDisabled {
+                return "At least one dictation shortcut must remain enabled."
             }
-            holdShortcut = binding
-        case .toggle:
-            if binding.isCustom {
-                savedToggleCustomShortcut = binding
+            if binding.isSameKeyCombo(as: otherDictation) {
+                return "Hold and toggle shortcuts must be different."
             }
-            toggleShortcut = binding
+            if binding.isSameKeyCombo(as: controlModeHoldShortcut) {
+                return "This shortcut is already used for Control Mode Hold."
+            }
+            if binding.isSameKeyCombo(as: controlModeToggleShortcut) {
+                return "This shortcut is already used for Control Mode Toggle."
+            }
+            if binding.isCustom { savedDictationHoldCustomShortcut = binding }
+            dictationHoldShortcut = binding
+
+        case .dictationToggle:
+            let otherDictation = dictationHoldShortcut
+            if binding.isDisabled && otherDictation.isDisabled {
+                return "At least one dictation shortcut must remain enabled."
+            }
+            if binding.isSameKeyCombo(as: otherDictation) {
+                return "Hold and toggle shortcuts must be different."
+            }
+            if binding.isSameKeyCombo(as: controlModeHoldShortcut) {
+                return "This shortcut is already used for Control Mode Hold."
+            }
+            if binding.isSameKeyCombo(as: controlModeToggleShortcut) {
+                return "This shortcut is already used for Control Mode Toggle."
+            }
+            if binding.isCustom { savedDictationToggleCustomShortcut = binding }
+            dictationToggleShortcut = binding
+
+        case .controlModeHold:
+            if binding.isSameKeyCombo(as: dictationHoldShortcut) {
+                return "This shortcut is already used for Dictation Mode Hold."
+            }
+            if binding.isSameKeyCombo(as: dictationToggleShortcut) {
+                return "This shortcut is already used for Dictation Mode Toggle."
+            }
+            if binding.isSameKeyCombo(as: controlModeToggleShortcut) {
+                return "This shortcut is already used for Control Mode Toggle."
+            }
+            if binding.isCustom { savedControlModeHoldCustomShortcut = binding }
+            controlModeHoldShortcut = binding
+
+        case .controlModeToggle:
+            if binding.isSameKeyCombo(as: dictationHoldShortcut) {
+                return "This shortcut is already used for Dictation Mode Hold."
+            }
+            if binding.isSameKeyCombo(as: dictationToggleShortcut) {
+                return "This shortcut is already used for Dictation Mode Toggle."
+            }
+            if binding.isSameKeyCombo(as: controlModeHoldShortcut) {
+                return "This shortcut is already used for Control Mode Hold."
+            }
+            if binding.isCustom { savedControlModeToggleCustomShortcut = binding }
+            controlModeToggleShortcut = binding
         }
 
         return nil
@@ -830,32 +922,76 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return
         }
 
-        hotkeyManager.start(configuration: ShortcutConfiguration(hold: holdShortcut, toggle: toggleShortcut))
+        hotkeyManager.start(configuration: ShortcutConfiguration(
+            dictationHold: dictationHoldShortcut,
+            dictationToggle: dictationToggleShortcut,
+            controlModeHold: controlModeHoldShortcut,
+            controlModeToggle: controlModeToggleShortcut
+        ))
     }
 
     private func handleShortcutEvent(_ event: ShortcutEvent) {
-        guard let action = shortcutSessionController.handle(event: event, isTranscribing: isTranscribing) else {
-            return
-        }
-
-        switch action {
-        case .start(let mode):
-            os_log(.info, log: recordingLog, "Shortcut start fired for mode %{public}@", mode.rawValue)
-            scheduleShortcutStart(mode: mode)
-        case .stop:
+        switch event {
+        case .controlModeHoldActivated:
+            guard !isRecording, !isTranscribing else { return }
             cancelPendingShortcutStart()
-            guard isRecording else {
+            shortcutSessionController.reset()
+            controlModeToggleArmed = false
+            startRecording(triggerMode: .hold, mode: .controlMode)
+            return
+
+        case .controlModeHoldDeactivated:
+            if activeRecordingMode == .controlMode {
+                stopAndTranscribe()
+            }
+            return
+
+        case .controlModeToggleActivated:
+            if activeRecordingMode == .controlMode {
+                guard controlModeToggleArmed else { return }
+                controlModeToggleArmed = false
+                stopAndTranscribe()
+            } else {
+                guard !isRecording, !isTranscribing else { return }
+                cancelPendingShortcutStart()
                 shortcutSessionController.reset()
-                activeRecordingTriggerMode = nil
+                controlModeToggleArmed = false
+                startRecording(triggerMode: .toggle, mode: .controlMode)
+            }
+            return
+
+        case .controlModeToggleDeactivated:
+            if activeRecordingMode == .controlMode {
+                controlModeToggleArmed = true
+            }
+            return
+
+        case .dictationHoldActivated, .dictationHoldDeactivated, .dictationToggleActivated, .dictationToggleDeactivated:
+            guard activeRecordingMode != .controlMode else { return }
+
+            guard let action = shortcutSessionController.handle(event: event, isTranscribing: isTranscribing) else {
                 return
             }
-            stopAndTranscribe()
-        case .switchedToToggle:
-            if isRecording {
-                activeRecordingTriggerMode = .toggle
-                overlayManager.setRecordingTriggerMode(.toggle, animated: true)
-            } else if pendingShortcutStartMode != nil {
-                pendingShortcutStartMode = .toggle
+
+            switch action {
+            case .start(let mode):
+                os_log(.info, log: recordingLog, "Shortcut start fired for mode %{public}@", mode.rawValue)
+                scheduleShortcutStart(mode: mode)
+            case .stop:
+                cancelPendingShortcutStart()
+                guard isRecording, activeRecordingMode == .dictation else {
+                    shortcutSessionController.reset()
+                    activeRecordingTriggerMode = nil
+                    return
+                }
+                stopAndTranscribe()
+            case .switchedToToggle:
+                if isRecording, activeRecordingMode == .dictation {
+                    activeRecordingTriggerMode = .toggle
+                    overlayManager.setRecordingTriggerMode(.toggle, animated: true)
+                } else if pendingShortcutStartMode != nil {
+                    pendingShortcutStartMode = .toggle
+                }
             }
         }
     }
@@ -911,16 +1047,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func startRecording(triggerMode: RecordingTriggerMode) {
+    private func startRecording(triggerMode: RecordingTriggerMode, mode: RecordingMode = .dictation) {
         let t0 = CFAbsoluteTimeGetCurrent()
         os_log(.info, log: recordingLog, "startRecording() entered")
         guard !isRecording && !isTranscribing else { return }
         cancelPendingShortcutStart()
+        activeRecordingMode = mode
         activeRecordingTriggerMode = triggerMode
         overlayManager.setRecordingTriggerMode(triggerMode, animated: false)
         guard hasAccessibility else {
             errorMessage = "Accessibility permission required. Grant access in System Settings > Privacy & Security > Accessibility."
             statusText = "No Accessibility"
+            activeRecordingMode = nil
             activeRecordingTriggerMode = nil
             shortcutSessionController.reset()
             showAccessibilityAlert()
@@ -947,6 +1085,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     } else {
                         self?.errorMessage = "Microphone permission denied. Grant access in System Settings > Privacy & Security > Microphone."
                         self?.statusText = "No Microphone"
+                        self?.activeRecordingMode = nil
                         self?.activeRecordingTriggerMode = nil
                         self?.shortcutSessionController.reset()
                         self?.showMicrophonePermissionAlert()
@@ -957,6 +1096,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         default:
             errorMessage = "Microphone permission denied. Grant access in System Settings > Privacy & Security > Microphone."
             statusText = "No Microphone"
+            activeRecordingMode = nil
             activeRecordingTriggerMode = nil
             shortcutSessionController.reset()
             showMicrophonePermissionAlert()
@@ -967,9 +1107,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func beginRecording(triggerMode: RecordingTriggerMode) {
         os_log(.info, log: recordingLog, "beginRecording() entered")
         errorMessage = nil
-
+        let isControlMode = activeRecordingMode == .controlMode
         isRecording = true
-        statusText = "Starting..."
+        statusText = isControlMode ? "Control Mode..." : "Starting..."
         hasShownScreenshotPermissionAlert = false
 
         // Show initializing dots only if engine takes longer than 0.5s to start
@@ -980,7 +1120,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
             guard let self, !overlayShown else { return }
             overlayShown = true
             os_log(.info, log: recordingLog, "engine slow — showing initializing overlay")
-            self.overlayManager.showInitializing(mode: self.activeRecordingTriggerMode ?? triggerMode)
+            self.overlayManager.showInitializing(
+                mode: self.activeRecordingTriggerMode ?? triggerMode,
+                isControlMode: isControlMode
+            )
         }
         initTimer.resume()
 
@@ -991,11 +1134,17 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 guard let self else { return }
                 initTimer.cancel()
                 os_log(.info, log: recordingLog, "first real audio — transitioning to waveform")
-                self.statusText = "Recording..."
+                self.statusText = isControlMode ? "Control Mode..." : "Recording..."
                 if overlayShown {
-                    self.overlayManager.transitionToRecording(mode: self.activeRecordingTriggerMode ?? triggerMode)
+                    self.overlayManager.transitionToRecording(
+                        mode: self.activeRecordingTriggerMode ?? triggerMode,
+                        isControlMode: isControlMode
+                    )
                 } else {
-                    self.overlayManager.showRecording(mode: self.activeRecordingTriggerMode ?? triggerMode)
+                    self.overlayManager.showRecording(
+                        mode: self.activeRecordingTriggerMode ?? triggerMode,
+                        isControlMode: isControlMode
+                    )
                 }
                 overlayShown = true
                 let s = NSSound(named: "Tink"); s?.volume = self.soundVolume; s?.play()
@@ -1021,8 +1170,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 DispatchQueue.main.async {
                     initTimer.cancel()
                     self.isRecording = false
+                    self.activeRecordingMode = nil
                     self.activeRecordingTriggerMode = nil
                     self.shortcutSessionController.reset()
+                    self.controlModeToggleArmed = false
                     self.errorMessage = self.formattedRecordingStartError(error)
                     self.statusText = "Error"
                     self.overlayManager.dismiss()
@@ -1135,7 +1286,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func stopAndTranscribe() {
         cancelPendingShortcutStart()
         shortcutSessionController.reset()
+        controlModeToggleArmed = false
+        guard isRecording, let recordingMode = activeRecordingMode else { return }
         activeRecordingTriggerMode = nil
+        activeRecordingMode = nil
         audioLevelCancellable?.cancel()
         audioLevelCancellable = nil
         debugStatusMessage = "Preparing audio"
@@ -1163,8 +1317,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let transcriptionFileURL = savedAudioFile?.fileURL ?? fileURL
         isRecording = false
         isTranscribing = true
-        statusText = "Transcribing..."
-        debugStatusMessage = "Transcribing audio"
+        statusText = recordingMode == .controlMode ? "Processing..." : "Transcribing..."
+        debugStatusMessage = recordingMode == .controlMode ? "Processing control instruction" : "Transcribing audio"
         errorMessage = nil
         let s = NSSound(named: "Pop"); s?.volume = soundVolume; s?.play()
         overlayManager.slideUpToNotch { }
@@ -1188,11 +1342,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
             forceHTTP2: forceHTTP2Transcription
         )
         let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
+        let capturedControlModeService = controlModeService
 
         Task {
             do {
-                async let transcript = transcriptionService.transcribe(fileURL: transcriptionFileURL)
-                let rawTranscript = try await transcript
+                let rawTranscript = try await transcriptionService.transcribe(fileURL: transcriptionFileURL)
                 let appContext: AppContext
                 if let sessionContext {
                     appContext = sessionContext
@@ -1201,64 +1355,104 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 } else {
                     appContext = fallbackContextAtStop()
                 }
-                await MainActor.run { [weak self] in
-                    self?.debugStatusMessage = "Running post-processing"
-                }
-                let (finalTranscript, processingStatus, postProcessingPrompt) = await processTranscript(
-                    rawTranscript,
-                    context: appContext,
-                    postProcessingService: postProcessingService,
-                    customVocabulary: customVocabulary,
-                    customSystemPrompt: customSystemPrompt
-                )
-
-                await MainActor.run {
-                    self.lastContextSummary = appContext.contextSummary
-                    self.lastContextScreenshotDataURL = appContext.screenshotDataURL
-                    self.lastContextScreenshotStatus = appContext.screenshotError
-                        ?? "available (\(appContext.screenshotMimeType ?? "image"))"
-                    let trimmedRawTranscript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let trimmedFinalTranscript = finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-                    self.lastPostProcessingPrompt = postProcessingPrompt
-                    self.lastRawTranscript = trimmedRawTranscript
-                    self.lastPostProcessedTranscript = trimmedFinalTranscript
-                    self.lastPostProcessingStatus = processingStatus
-                    self.recordPipelineHistoryEntry(
-                        rawTranscript: trimmedRawTranscript,
-                        postProcessedTranscript: trimmedFinalTranscript,
-                        postProcessingPrompt: postProcessingPrompt,
+                switch recordingMode {
+                case .dictation:
+                    await MainActor.run { [weak self] in
+                        self?.debugStatusMessage = "Running post-processing"
+                    }
+                    let (finalTranscript, processingStatus, postProcessingPrompt) = await processTranscript(
+                        rawTranscript,
                         context: appContext,
-                        processingStatus: processingStatus,
-                        audioFileName: savedAudioFile?.fileName
+                        postProcessingService: postProcessingService,
+                        customVocabulary: customVocabulary,
+                        customSystemPrompt: customSystemPrompt
                     )
-                    self.transcribingIndicatorTask?.cancel()
-                    self.transcribingIndicatorTask = nil
-                    self.lastTranscript = trimmedFinalTranscript
-                    self.isTranscribing = false
-                    self.debugStatusMessage = "Done"
-                    let completionStatusText = self.preserveClipboard ? "Pasted at cursor!" : "Copied to clipboard!"
 
-                    if trimmedFinalTranscript.isEmpty {
-                        self.statusText = "Nothing to transcribe"
-                        self.overlayManager.dismiss()
-                    } else {
-                        self.statusText = completionStatusText
-                        self.overlayManager.showDone()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                    await MainActor.run {
+                        self.lastContextSummary = appContext.contextSummary
+                        self.lastContextScreenshotDataURL = appContext.screenshotDataURL
+                        self.lastContextScreenshotStatus = appContext.screenshotError
+                            ?? "available (\(appContext.screenshotMimeType ?? "image"))"
+                        let trimmedRawTranscript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let trimmedFinalTranscript = finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+                        self.lastPostProcessingPrompt = postProcessingPrompt
+                        self.lastRawTranscript = trimmedRawTranscript
+                        self.lastPostProcessedTranscript = trimmedFinalTranscript
+                        self.lastPostProcessingStatus = processingStatus
+                        self.recordPipelineHistoryEntry(
+                            rawTranscript: trimmedRawTranscript,
+                            postProcessedTranscript: trimmedFinalTranscript,
+                            postProcessingPrompt: postProcessingPrompt,
+                            context: appContext,
+                            processingStatus: processingStatus,
+                            audioFileName: savedAudioFile?.fileName
+                        )
+                        self.transcribingIndicatorTask?.cancel()
+                        self.transcribingIndicatorTask = nil
+                        self.lastTranscript = trimmedFinalTranscript
+                        self.isTranscribing = false
+                        self.debugStatusMessage = "Done"
+                        let completionStatusText = self.preserveClipboard ? "Pasted at cursor!" : "Copied to clipboard!"
+
+                        if trimmedFinalTranscript.isEmpty {
+                            self.statusText = "Nothing to transcribe"
                             self.overlayManager.dismiss()
+                        } else {
+                            self.statusText = completionStatusText
+                            self.overlayManager.showDone()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                                self.overlayManager.dismiss()
+                            }
+
+                            let pendingClipboardRestore = self.writeTranscriptToPasteboard(trimmedFinalTranscript)
+                            self.pasteAtCursorWhenShortcutReleased {
+                                self.restoreClipboardIfNeeded(pendingClipboardRestore)
+                            }
                         }
 
-                        let pendingClipboardRestore = self.writeTranscriptToPasteboard(trimmedFinalTranscript)
-                        self.pasteAtCursorWhenShortcutReleased {
-                            self.restoreClipboardIfNeeded(pendingClipboardRestore)
+                        self.audioRecorder.cleanup()
+
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            if self.statusText == completionStatusText || self.statusText == "Nothing to transcribe" {
+                                self.statusText = "Ready"
+                            }
                         }
                     }
 
-                    self.audioRecorder.cleanup()
+                case .controlMode:
+                    let output = try await capturedControlModeService.process(
+                        instruction: rawTranscript,
+                        selectedText: appContext.selectedText,
+                        screenshotDataURL: appContext.screenshotDataURL
+                    )
 
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                        if self.statusText == completionStatusText || self.statusText == "Nothing to transcribe" {
-                            self.statusText = "Ready"
+                    await MainActor.run {
+                        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                        self.transcribingIndicatorTask?.cancel()
+                        self.transcribingIndicatorTask = nil
+                        self.isTranscribing = false
+                        self.audioRecorder.cleanup()
+                        self.debugStatusMessage = "Done"
+
+                        if trimmed.isEmpty {
+                            self.statusText = "Nothing to output"
+                            self.overlayManager.dismiss()
+                        } else {
+                            self.statusText = "Done"
+                            self.overlayManager.showDone()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                                self.overlayManager.dismiss()
+                            }
+                            let pendingClipboardRestore = self.writeTranscriptToPasteboard(trimmed)
+                            self.pasteAtCursorWhenShortcutReleased {
+                                self.restoreClipboardIfNeeded(pendingClipboardRestore)
+                            }
+                        }
+
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            if self.statusText == "Done" || self.statusText == "Nothing to output" {
+                                self.statusText = "Ready"
+                            }
                         }
                     }
                 }
@@ -1277,24 +1471,27 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     self.errorMessage = error.localizedDescription
                     self.isTranscribing = false
                     self.statusText = "Error"
+                    self.debugStatusMessage = "Error"
                     self.audioRecorder.cleanup()
                     self.overlayManager.dismiss()
-                    self.lastPostProcessedTranscript = ""
-                    self.lastRawTranscript = ""
-                    self.lastContextSummary = ""
-                    self.lastPostProcessingStatus = "Error: \(error.localizedDescription)"
-                    self.lastPostProcessingPrompt = ""
-                    self.lastContextScreenshotDataURL = resolvedContext.screenshotDataURL
-                    self.lastContextScreenshotStatus = resolvedContext.screenshotError
-                        ?? "available (\(resolvedContext.screenshotMimeType ?? "image"))"
-                    self.recordPipelineHistoryEntry(
-                        rawTranscript: "",
-                        postProcessedTranscript: "",
-                        postProcessingPrompt: "",
-                        context: resolvedContext,
-                        processingStatus: "Error: \(error.localizedDescription)",
-                        audioFileName: savedAudioFile?.fileName
-                    )
+                    if recordingMode == .dictation {
+                        self.lastPostProcessedTranscript = ""
+                        self.lastRawTranscript = ""
+                        self.lastContextSummary = ""
+                        self.lastPostProcessingStatus = "Error: \(error.localizedDescription)"
+                        self.lastPostProcessingPrompt = ""
+                        self.lastContextScreenshotDataURL = resolvedContext.screenshotDataURL
+                        self.lastContextScreenshotStatus = resolvedContext.screenshotError
+                            ?? "available (\(resolvedContext.screenshotMimeType ?? "image"))"
+                        self.recordPipelineHistoryEntry(
+                            rawTranscript: "",
+                            postProcessedTranscript: "",
+                            postProcessingPrompt: "",
+                            context: resolvedContext,
+                            processingStatus: "Error: \(error.localizedDescription)",
+                            audioFileName: savedAudioFile?.fileName
+                        )
+                    }
                 }
             }
         }
@@ -1429,16 +1626,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
             hasShownScreenshotPermissionAlert = true
 
             // Permission errors are fatal — stop recording
-            _ = audioRecorder.stopRecording()
-            audioRecorder.cleanup()
-            audioLevelCancellable?.cancel()
-            audioLevelCancellable = nil
-            contextCaptureTask?.cancel()
-            contextCaptureTask = nil
-            capturedContext = nil
-            isRecording = false
+            cancelPendingShortcutStart()
             shortcutSessionController.reset()
-            activeRecordingTriggerMode = nil
+            controlModeToggleArmed = false
+            cancelRecording()
             statusText = "Screenshot Required"
             overlayManager.dismiss()
 
@@ -1561,5 +1752,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
             self?.pasteAtCursor()
             completion?()
         }
+    }
+
+    private func cancelRecording() {
+        audioLevelCancellable?.cancel()
+        audioLevelCancellable = nil
+        contextCaptureTask?.cancel()
+        contextCaptureTask = nil
+        capturedContext = nil
+        _ = audioRecorder.stopRecording()
+        audioRecorder.cleanup()
+        isRecording = false
+        activeRecordingMode = nil
+        activeRecordingTriggerMode = nil
+        controlModeToggleArmed = false
+        overlayManager.dismiss()
     }
 }
