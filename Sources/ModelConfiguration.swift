@@ -12,7 +12,7 @@ public struct ModelConfiguration {
         "openai/gpt-oss-20b",
         "openai/gpt-oss-120b",
         "openai/gpt-oss-safeguard-20b",
-        "qwen/qwen3.6-27b",
+        "qwen/qwen3.8-27b",
         "groq/compound",
         "groq/compound-mini"
     ]
@@ -21,7 +21,7 @@ public struct ModelConfiguration {
 
     /// Models that accept image input. The context model must support vision for screenshot analysis to work.
     public static let visionModels = [
-        "qwen/qwen3.6-27b"
+        "qwen/qwen3.8-27b"
     ]
 
     public static let transcriptionModels = [
@@ -34,7 +34,7 @@ public struct ModelConfiguration {
         
         // Normalize providerless aliases
         if cleanModel == "qwen3-32b" { cleanModel = "qwen/qwen3-32b" }
-        else if cleanModel == "qwen3.6-27b" { cleanModel = "qwen/qwen3.6-27b" }
+        else if cleanModel == "qwen3.8-27b" { cleanModel = "qwen/qwen3.8-27b" }
         else if cleanModel == "gpt-oss-20b" { cleanModel = "openai/gpt-oss-20b" }
         else if cleanModel == "gpt-oss-120b" { cleanModel = "openai/gpt-oss-120b" }
         else if cleanModel == "gpt-oss-safeguard-20b" { cleanModel = "openai/gpt-oss-safeguard-20b" }
@@ -68,7 +68,7 @@ public struct ModelConfiguration {
                 includeReasoning: nil,
                 shouldStripThinkTags: true
             )
-        } else if cleanModel == "qwen/qwen3.6-27b" {
+        } else if cleanModel == "qwen/qwen3.8-27b" {
             return ModelConfig(
                 maxCompletionTokens: nil,
                 reasoningEffort: "none",

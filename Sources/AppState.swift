@@ -276,10 +276,17 @@ final class AppState: ObservableObject, @unchecked Sendable {
         ("ca", "Catalan")
     ]
     static let defaultPostProcessingModel = "openai/gpt-oss-20b"
-    static let defaultPostProcessingFallbackModel = "qwen/qwen3.6-27b"
-    static let defaultContextModel = "qwen/qwen3.6-27b"
-    private static let deprecatedDefaultPostProcessingFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
-    private static let deprecatedDefaultContextModel = "meta-llama/llama-4-scout-17b-16e-instruct"
+    static let defaultPostProcessingFallbackModel = "qwen/qwen3.8-27b"
+    static let defaultContextModel = "qwen/qwen3.8-27b"
+    /// Former defaults that Groq has since retired; stored values matching these are migrated to the current default.
+    private static let deprecatedDefaultPostProcessingFallbackModels: Set<String> = [
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "qwen/qwen3.6-27b"
+    ]
+    private static let deprecatedDefaultContextModels: Set<String> = [
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "qwen/qwen3.6-27b"
+    ]
     private static let trailingPressEnterCommandPattern = try! NSRegularExpression(
         pattern: #"(?i)(?:^|[ \t\r\n,;:\-]+)press[ \t\r\n]+enter[\s\p{P}]*$"#
     )
@@ -879,7 +886,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         let trimmed = stored.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed == deprecatedDefaultContextModel {
+        if deprecatedDefaultContextModels.contains(trimmed) {
             UserDefaults.standard.set(defaultContextModel, forKey: key)
             return defaultContextModel
         }
@@ -893,7 +900,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         let trimmed = stored.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed == deprecatedDefaultPostProcessingFallbackModel {
+        if deprecatedDefaultPostProcessingFallbackModels.contains(trimmed) {
             UserDefaults.standard.set(defaultPostProcessingFallbackModel, forKey: key)
             return defaultPostProcessingFallbackModel
         }

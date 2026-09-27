@@ -13,7 +13,7 @@ enum ModelConfigurationTests {
         assertSameConfig("gpt-oss-120b", "openai/gpt-oss-120b")
         assertSameConfig("gpt-oss-safeguard-20b", "openai/gpt-oss-safeguard-20b")
         assertSameConfig("qwen3-32b", "qwen/qwen3-32b")
-        assertSameConfig(" QWEN3.6-27B ", "qwen/qwen3.6-27b")
+        assertSameConfig(" QWEN3.8-27B ", "qwen/qwen3.8-27b")
     }
 
     private static func testKnownModelSettingsRemainStable() {
@@ -23,7 +23,7 @@ enum ModelConfigurationTests {
         TestSupport.expectEqual(gptOSS.includeReasoning, false)
         TestSupport.expectEqual(gptOSS.shouldStripThinkTags, false)
 
-        let qwen = ModelConfiguration.config(for: "qwen/qwen3.6-27b")
+        let qwen = ModelConfiguration.config(for: "qwen/qwen3.8-27b")
         TestSupport.expectEqual(qwen.reasoningEffort, "none")
         TestSupport.expectEqual(qwen.includeReasoning, false)
         TestSupport.expectEqual(qwen.shouldStripThinkTags, true)

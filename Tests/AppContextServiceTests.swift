@@ -14,7 +14,7 @@ enum AppContextServiceTests {
         The user is replying to an email about the product launch. They likely intend to confirm the next steps. This third sentence should be dropped.
         """
 
-        let summary = AppContextService.activitySummary(from: output, model: "qwen/qwen3.6-27b")
+        let summary = AppContextService.activitySummary(from: output, model: "qwen/qwen3.8-27b")
 
         TestSupport.expectEqual(
             summary,
@@ -31,7 +31,7 @@ enum AppContextServiceTests {
         The user is editing a project note in FreeFlow. They likely intend to tighten the release wording.
         """
 
-        let summary = AppContextService.activitySummary(from: output, model: "qwen/qwen3.6-27b")
+        let summary = AppContextService.activitySummary(from: output, model: "qwen/qwen3.8-27b")
 
         TestSupport.expectEqual(
             summary,
@@ -54,6 +54,7 @@ enum AppContextServiceTests {
     private static func testDeprecatedGroqModelsAreNotPredefined() {
         let deprecatedModels = [
             "qwen/qwen3-32b",
+            "qwen/qwen3.6-27b",
             "meta-llama/llama-4-scout-17b-16e-instruct",
             "llama-3.1-8b-instant",
             "llama-3.3-70b-versatile"
@@ -62,11 +63,11 @@ enum AppContextServiceTests {
         for model in deprecatedModels {
             TestSupport.expect(!ModelConfiguration.llmModels.contains(model), "Deprecated model remains in picker: \(model)")
         }
-        TestSupport.expect(ModelConfiguration.llmModels.contains("qwen/qwen3.6-27b"), "New fallback is missing from picker")
+        TestSupport.expect(ModelConfiguration.llmModels.contains("qwen/qwen3.8-27b"), "New fallback is missing from picker")
     }
 
     private static func testQwenCleanupDisablesReasoning() {
-        let config = ModelConfiguration.config(for: "qwen/qwen3.6-27b")
+        let config = ModelConfiguration.config(for: "qwen/qwen3.8-27b")
 
         TestSupport.expect(config.reasoningEffort == "none", "Qwen cleanup should disable reasoning")
         TestSupport.expect(config.includeReasoning == false, "Qwen cleanup should exclude reasoning output")

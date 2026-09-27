@@ -27,7 +27,7 @@ struct AppContext {
 }
 
 final class AppContextService {
-    static let defaultContextModel = "qwen/qwen3.6-27b"
+    static let defaultContextModel = "qwen/qwen3.8-27b"
     static let defaultContextPrompt = """
 You are a context synthesis assistant for a speech-to-text pipeline.
 Given app/window metadata and an optional screenshot, output exactly two sentences that describe what the user is doing right now and the likely writing intent in the current window.
