@@ -2132,6 +2132,11 @@ struct RunLogEntryView: View {
         item.postProcessingStatus.hasPrefix("Error:")
     }
 
+    /// Failed runs, plus runs where cleanup failed and the raw transcript was pasted.
+    private var canRetry: Bool {
+        isError || item.postProcessingStatus.contains("failed")
+    }
+
     private var copyableTranscript: String {
         if !item.postProcessedTranscript.isEmpty {
             return item.postProcessedTranscript
@@ -2204,7 +2209,7 @@ struct RunLogEntryView: View {
                 .buttonStyle(.plain)
 
                 HStack(spacing: 4) {
-                    if isError && item.audioFileName != nil {
+                    if canRetry && item.audioFileName != nil {
                         Button {
                             appState.retryTranscription(item: item)
                         } label: {
