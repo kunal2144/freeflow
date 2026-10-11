@@ -156,6 +156,14 @@ struct MenuBarView: View {
                     .frame(maxWidth: 280, alignment: .leading)
             }
 
+            if appState.latestRerunnableHistoryItem != nil && !appState.isRecording && !appState.isTranscribing {
+                Button(appState.isRerunningLatestRecording ? "Rerunning Last Recording…" : "Rerun Last Recording") {
+                    appState.rerunLatestRecording()
+                }
+                .disabled(appState.isRerunningLatestRecording)
+                .help("Transcribe and clean up the latest recording again, then copy the result")
+            }
+
             Menu("History") {
                 if recentHistoryItems.isEmpty {
                     Text("No transcripts yet")

@@ -1180,6 +1180,21 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// The newest run whose audio is still on disk, for the menu bar's rerun button.
+    var latestRerunnableHistoryItem: PipelineHistoryItem? {
+        pipelineHistory.first { $0.audioFileName != nil }
+    }
+
+    var isRerunningLatestRecording: Bool {
+        guard let item = latestRerunnableHistoryItem else { return false }
+        return retryingItemIDs.contains(item.id)
+    }
+
+    func rerunLatestRecording() {
+        guard let item = latestRerunnableHistoryItem else { return }
+        retryTranscription(item: item)
+    }
+
     func retryTranscription(item: PipelineHistoryItem) {
         guard let audioFileName = item.audioFileName else { return }
         guard !retryingItemIDs.contains(item.id) else { return }

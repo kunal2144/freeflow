@@ -25,18 +25,47 @@ enum LLMAPITransport {
     static func data(
         for request: URLRequest
     ) async throws -> (Data, URLResponse) {
-        let session = makeEphemeralSession(timeout: timeout(for: request))
-        defer { session.finishTasksAndInvalidate() }
-        return try await session.data(for: request)
+        try await retryingOnceIfConnectionDropped {
+            let session = makeEphemeralSession(timeout: timeout(for: request))
+            defer { session.finishTasksAndInvalidate() }
+            return try await session.data(for: request)
+        }
     }
 
     static func upload(
         for request: URLRequest,
         from bodyData: Data
     ) async throws -> (Data, URLResponse) {
-        // Fresh session per upload — no poisoned connection re-use.
-        let session = makeEphemeralSession(timeout: timeout(for: request))
-        defer { session.finishTasksAndInvalidate() }
-        return try await session.upload(for: request, from: bodyData)
+        try await retryingOnceIfConnectionDropped {
+            // Fresh session per upload — no poisoned connection re-use.
+            let session = makeEphemeralSession(timeout: timeout(for: request))
+            defer { session.finishTasksAndInvalidate() }
+            return try await session.upload(for: request, from: bodyData)
+        }
+    }
+
+    /// Connection-level failures where the request most likely never reached
+    /// the provider (for example an HTTP/3 connection the server closed while
+    /// idle). One immediate retry on a fresh session usually succeeds, and is
+    /// far better than silently pasting the raw transcript.
+    static func isTransientConnectionError(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .networkConnectionLost, .cannotConnectToHost, .secureConnectionFailed:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func retryingOnceIfConnectionDropped<T>(
+        _ operation: () async throws -> T
+    ) async throws -> T {
+        do {
+            return try await operation()
+        } catch where isTransientConnectionError(error) {
+            try await Task.sleep(nanoseconds: 300_000_000)
+            return try await operation()
+        }
     }
 }
